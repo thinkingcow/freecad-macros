@@ -1,0 +1,114 @@
+# Center an object relative to a reference object
+import FreeCAD as App
+import FreeCADGui as Gui
+
+# FreeCAD 1.1 uses PySide6, but fallbacks ensure cross-version compatibility
+try:
+    from PySide6 import QtCore, QtWidgets
+except ImportError:
+    try:
+        from PySide2 import QtCore, QtWidgets
+    except ImportError:
+        from PySide import QtCore
+        from PySide import QtGui as QtWidgets
+
+class AlignPlacementDialog(QtWidgets.QDialog):
+    def __init__(self, obj_move, obj_target):
+        super().__init__()
+        self.obj_move = obj_move
+        self.obj_target = obj_target
+        self.init_ui()
+
+    def init_ui(self):
+        self.setWindowTitle("Align Object Placement")
+        self.setMinimumWidth(320)
+
+        layout = QtWidgets.QVBoxLayout()
+
+        # Display object names and indicate which is moving
+        info_text = (
+            f"<b>Moving Object (2nd selected):</b> {self.obj_move.Label}<br><br>"
+            f"<b>Target Object (1st selected):</b> {self.obj_target.Label}"
+        )
+        label_info = QtWidgets.QLabel(info_text)
+        layout.addWidget(label_info)
+
+        # Divider line
+        line = QtWidgets.QFrame()
+        line.setFrameShape(QtWidgets.QFrame.HLine)
+        line.setFrameShadow(QtWidgets.QFrame.Sunken)
+        layout.addWidget(line)
+
+        instruction_label = QtWidgets.QLabel("Select axes to align:")
+        layout.addWidget(instruction_label)
+
+        # X, Y, Z Checkboxes (pre-selected)
+        self.chk_x = QtWidgets.QCheckBox("Align X axis")
+        self.chk_x.setChecked(True)
+        
+        self.chk_y = QtWidgets.QCheckBox("Align Y axis")
+        self.chk_y.setChecked(True)
+        
+        self.chk_z = QtWidgets.QCheckBox("Align Z axis")
+        self.chk_z.setChecked(True)
+
+        layout.addWidget(self.chk_x)
+        layout.addWidget(self.chk_y)
+        layout.addWidget(self.chk_z)
+
+        # OK / Cancel Buttons
+        button_box = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
+        button_box.accepted.connect(self.apply_alignment)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+
+        self.setLayout(layout)
+
+    def apply_alignment(self):
+        # Duplicate the placement to modify it safely
+        new_placement = self.obj_move.Placement
+        target_pos = self.obj_target.Placement.Base
+
+        # Apply target coordinates based on checkbox selections
+        if self.chk_x.isChecked():
+            new_placement.Base.x = target_pos.x
+        if self.chk_y.isChecked():
+            new_placement.Base.y = target_pos.y
+        if self.chk_z.isChecked():
+            new_placement.Base.z = target_pos.z
+
+        # Apply the new placement and recompute the document
+        self.obj_move.Placement = new_placement
+        App.ActiveDocument.recompute()
+        self.accept()
+
+def main():
+    # Retrieve current selection
+    sel = Gui.Selection.getSelection()
+    
+    # Validate exactly 2 objects are selected
+    if len(sel) != 2:
+        QtWidgets.QMessageBox.warning(
+            None, 
+            "Selection Error", 
+            "Please select exactly 2 objects.\n\nThe second object will be centered on the first."
+        )
+        return
+
+    obj1, obj2 = sel[1], sel[0]
+
+    # Prevent operating on objects (like Sketches mapped to faces) without a standard Placement property
+    if not hasattr(obj1, "Placement") or not hasattr(obj2, "Placement"):
+        QtWidgets.QMessageBox.critical(
+            None, 
+            "Property Error", 
+            "One or both of the selected objects do not have a modifiable Placement property."
+        )
+        return
+
+    # Launch the alignment dialog
+    dialog = AlignPlacementDialog(obj1, obj2)
+    dialog.exec()
+
+if __name__ == "__main__":
+    main()

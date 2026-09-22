@@ -1,0 +1,239 @@
+# make a cylinder with splines to facilitate a tighter fit for 3D printed parts
+import FreeCAD
+import Part
+import math
+
+# Handle FreeCAD's PySide version transitions (FreeCAD 1.1 uses PySide6)
+try:
+    from PySide import QtWidgets, QtCore
+except ImportError:
+    try:
+        from PySide6 import QtWidgets, QtCore
+    except ImportError:
+        from PySide2 import QtWidgets, QtCore
+
+
+class SplinedCylinderFeature:
+    """The Proxy class for our custom parametric FreeCAD object"""
+    def __init__(self, obj, radius, height, num_splines, protrusion, width, offset):
+        # Define the properties first, then assign the values.
+        obj.addProperty("App::PropertyLength", "Radius", "Spline Parameters", "Radius of the base cylinder")
+        obj.Radius = radius
+        
+        obj.addProperty("App::PropertyLength", "Height", "Spline Parameters", "Height of the cylinder")
+        obj.Height = height
+        
+        obj.addProperty("App::PropertyInteger", "NumSplines", "Spline Parameters", "Number of splines")
+        obj.NumSplines = num_splines
+        
+        obj.addProperty("App::PropertyLength", "Protrusion", "Spline Parameters", "Protrusion (+ for outward, - for inward)")
+        obj.Protrusion = protrusion
+        
+        obj.addProperty("App::PropertyLength", "SplineWidth", "Spline Parameters", "Width of each spline")
+        obj.SplineWidth = width
+        
+        obj.addProperty("App::PropertyLength", "Offset", "Spline Parameters", "Chamfer start distance from the end")
+        obj.Offset = offset
+        
+        obj.Proxy = self
+
+    def execute(self, obj):
+        """This method runs every time a property is changed in the property view"""
+        # Extract values (Handling FreeCAD's Quantity objects using .Value)
+        radius = obj.Radius.Value
+        height = obj.Height.Value
+        num_splines = obj.NumSplines
+        protrusion = obj.Protrusion.Value
+        width = obj.SplineWidth.Value
+        offset = obj.Offset.Value
+        
+        # Create the base cylinder geometry
+        cyl = Part.makeCylinder(radius, height)
+        
+        if protrusion == 0 or num_splines <= 0:
+            obj.Shape = cyl
+            return
+            
+        # Prevent the offset from completely missing the cylinder
+        offset = max(0.0, min(offset, height - 0.01))
+        
+        # Calculate geometric overlaps to ensure clean boolean operations
+        overlap = max(1.0, abs(protrusion))
+        
+        if protrusion > 0:
+            x_overlap = radius - overlap
+            x_flush = radius
+            x_full = radius + protrusion
+        else:
+            x_overlap = radius + overlap
+            x_flush = radius
+            x_full = radius + protrusion
+            
+        z_start = offset
+        z_chamfer = offset + abs(protrusion)
+        z_end = height
+        
+        # Handle edge case where chamfer length exceeds cylinder height
+        if z_chamfer > height:
+            ratio = (height - offset) / abs(protrusion)
+            x_full = radius + protrusion * ratio
+            z_chamfer = height
+            
+        # Build the 2D cross-section profile of the spline
+        pts = []
+        pts.append(FreeCAD.Vector(x_overlap, 0, z_start))
+        pts.append(FreeCAD.Vector(x_flush, 0, z_start))
+        pts.append(FreeCAD.Vector(x_full, 0, z_chamfer))
+        
+        if z_chamfer < height:
+            pts.append(FreeCAD.Vector(x_full, 0, z_end))
+            
+        pts.append(FreeCAD.Vector(x_overlap, 0, z_end))
+        pts.append(pts[0])
+        
+        poly = Part.makePolygon(pts)
+        face = Part.Face(poly)
+        
+        # Extrude to create the 3D spline tool and center it
+        spline_tool = face.extrude(FreeCAD.Vector(0, width, 0))
+        spline_tool.translate(FreeCAD.Vector(0, -width / 2.0, 0))
+        
+        # Generate the circular array of splines
+        tools = []
+        for i in range(num_splines):
+            angle = (360.0 / num_splines) * i
+            tool = spline_tool.copy()
+            tool.rotate(FreeCAD.Vector(0,0,0), FreeCAD.Vector(0,0,1), angle)
+            tools.append(tool)
+            
+        # Execute Boolean operations
+        if protrusion > 0:
+            final_shape = cyl
+            for t in tools:
+                final_shape = final_shape.fuse(t)
+        else:
+            comp = Part.makeCompound(tools)
+            final_shape = cyl.cut(comp)
+            
+        # Refine the shape and assign it to the object
+        final_shape = final_shape.removeSplitter()
+        obj.Shape = final_shape
+
+    def __getstate__(self):
+        return None
+
+    def __setstate__(self, state):
+        return None
+
+
+class ViewProviderSplinedCylinder:
+    """Handles the display properties of our custom object"""
+    def __init__(self, vobj):
+        vobj.Proxy = self
+
+    def attach(self, vobj):
+        self.ViewObject = vobj
+        self.Object = vobj.Object
+
+    def updateData(self, fp, prop):
+        pass
+
+    def getIcon(self):
+        return ""
+
+    def __getstate__(self):
+        return None
+
+    def __setstate__(self, state):
+        return None
+
+
+class SplineDialog(QtWidgets.QDialog):
+    """The initial setup dialog UI"""
+    def __init__(self):
+        super(SplineDialog, self).__init__()
+        self.setWindowTitle("Create Parametric Splined Cylinder")
+        self.setModal(True)
+        self.layout = QtWidgets.QFormLayout(self)
+
+        self.radius_input = QtWidgets.QDoubleSpinBox()
+        self.radius_input.setRange(0.1, 1000.0)
+        self.radius_input.setValue(10.0)
+        self.layout.addRow("Cylinder Radius (mm):", self.radius_input)
+
+        self.height_input = QtWidgets.QDoubleSpinBox()
+        self.height_input.setRange(0.1, 1000.0)
+        self.height_input.setValue(20.0)
+        self.layout.addRow("Cylinder Height (mm):", self.height_input)
+
+        self.splines_input = QtWidgets.QSpinBox()
+        self.splines_input.setRange(1, 360)
+        self.splines_input.setValue(6)
+        self.layout.addRow("Number of Splines:", self.splines_input)
+
+        self.protrusion_input = QtWidgets.QDoubleSpinBox()
+        self.protrusion_input.setRange(-100.0, 100.0)
+        self.protrusion_input.setSingleStep(0.2)
+        self.protrusion_input.setValue(0.5)
+        self.layout.addRow("Protrusion (+ for outward, - for inward):", self.protrusion_input)
+        
+        self.width_input = QtWidgets.QDoubleSpinBox()
+        self.width_input.setRange(0.1, 100.0)
+        self.width_input.setSingleStep(0.2)
+        self.width_input.setValue(1.5)
+        self.layout.addRow("Spline Width (mm):", self.width_input)
+
+        self.offset_input = QtWidgets.QDoubleSpinBox()
+        self.offset_input.setRange(0.0, 1000.0)
+        self.offset_input.setValue(2.0)
+        self.layout.addRow("Chamfer Start Distance (mm):", self.offset_input)
+
+        self.buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+        self.layout.addRow(self.buttons)
+
+    def get_values(self):
+        return {
+            "radius": self.radius_input.value(),
+            "height": self.height_input.value(),
+            "splines": self.splines_input.value(),
+            "protrusion": self.protrusion_input.value(),
+            "width": self.width_input.value(),
+            "offset": self.offset_input.value()
+        }
+
+
+def main():
+    dialog = SplineDialog()
+    
+    # Compatibility execution handling
+    exec_method = getattr(dialog, "exec", dialog.exec_)
+    if exec_method():
+        vals = dialog.get_values()
+        
+        doc = FreeCAD.activeDocument()
+        if doc is None:
+            doc = FreeCAD.newDocument()
+            
+        # Create the FeaturePython object instead of a static shape
+        part = doc.addObject("Part::FeaturePython", "SplinedCylinder")
+        
+        # Attach our python proxies
+        SplinedCylinderFeature(
+            part, 
+            vals["radius"], 
+            vals["height"], 
+            vals["splines"], 
+            vals["protrusion"], 
+            vals["width"], 
+            vals["offset"]
+        )
+        ViewProviderSplinedCylinder(part.ViewObject)
+        
+        # Recompute to draw the initial shape and fit the view
+        doc.recompute()
+        FreeCAD.Gui.SendMsgToActiveView("ViewFit")
+
+if __name__ == "__main__":
+    main()
