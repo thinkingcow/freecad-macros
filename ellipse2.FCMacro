@@ -1,0 +1,176 @@
+# ==============================================================================
+# FreeCAD Elliptical Gear Generator Macro
+# Generates a true elliptical gear with involute teeth and a center bore.
+# ==============================================================================
+
+import FreeCAD
+import Part
+import math
+
+# ================== GEAR PARAMETERS ==================
+A_SEMI_AXIS = 45.0       # Semi-major axis (a) in mm
+B_SEMI_AXIS = 25.0       # Semi-minor axis (b) in mm
+NUM_TEETH = 35           # Number of teeth (Z)
+PRESSURE_ANGLE = 20.0    # Pressure angle in degrees
+THICKNESS = 5.0       # Thickness of the gear in mm
+BORE_RADIUS = 2.4       # Center bore hole radius in mm
+# =====================================================
+
+def get_arc_lengths(a, b, num_steps=3000):
+    """Calculates arc length of the ellipse numerically for even tooth spacing."""
+    t_vals = []
+    s_vals = []
+    s = 0.0
+    dt = 2.0 * math.pi / num_steps
+    
+    for i in range(num_steps + 1):
+        t = i * dt
+        t_vals.append(t)
+        s_vals.append(s)
+        if i < num_steps:
+            # Midpoint integration for higher accuracy
+            tm = t + dt / 2.0
+            ds = math.sqrt((-a * math.sin(tm))**2 + (b * math.cos(tm))**2) * dt
+            s += ds
+    return t_vals, s_vals, s
+
+def interp(s_target, t_vals, s_vals):
+    """Interpolates parameter t for a given arc length s."""
+    for i in range(len(s_vals) - 1):
+        if s_vals[i] <= s_target <= s_vals[i+1]:
+            ratio = (s_target - s_vals[i]) / (s_vals[i+1] - s_vals[i])
+            return t_vals[i] + ratio * (t_vals[i+1] - t_vals[i])
+    return t_vals[-1]
+
+def get_tooth_points(Rc, m, alpha, p):
+    """Generates the 2D local coordinates of an involute tooth based on local curvature."""
+    alpha_rad = math.radians(alpha)
+    Rb = Rc * math.cos(alpha_rad)
+    Rout = Rc + m
+    Rroot = Rc - 1.25 * m  # Standard root depth
+    
+    inv_alpha = math.tan(alpha_rad) - alpha_rad
+    theta_base = (math.pi * m) / (4.0 * Rc) + inv_alpha
+    theta_pitch_half = p / (2.0 * Rc)
+    
+    pts_local = []
+    
+    def add_polar(r, theta):
+        # Center of curvature is at (0, -Rc) in local frame
+        x = r * math.sin(theta)
+        y = r * math.cos(theta) - Rc
+        pts_local.append(FreeCAD.Vector(x, y, 0))
+        
+    def get_inv_theta(r):
+        val = max(0.0, (r / Rb)**2 - 1.0)
+        phi = math.sqrt(val)
+        return theta_base - (math.tan(phi) - phi)
+
+    # 1. Left Root Point
+    add_polar(Rroot, -theta_pitch_half)
+
+    # 2. Left Flank Base Connection
+    if Rroot < Rb:
+        add_polar(Rroot, -theta_base)
+
+    # 3. Left Flank (Involute curve)
+    r_start = max(Rb, Rroot)
+    num_inv = 12
+    for i in range(num_inv + 1):
+        r = r_start + (Rout - r_start) * (i / num_inv)
+        add_polar(r, -get_inv_theta(r))
+
+    # 4. Right Flank (Involute curve)
+    for i in range(num_inv, -1, -1):
+        r = r_start + (Rout - r_start) * (i / num_inv)
+        add_polar(r, get_inv_theta(r))
+
+    # 5. Right Flank Base Connection
+    if Rroot < Rb:
+        add_polar(Rroot, theta_base)
+
+    # 6. Right Root Point
+    add_polar(Rroot, theta_pitch_half)
+    
+    return pts_local
+
+def main():
+    # Enforce a >= b
+    a = max(A_SEMI_AXIS, B_SEMI_AXIS)
+    b = min(A_SEMI_AXIS, B_SEMI_AXIS)
+    
+    # 1. Calculate Perimeter and Module
+    t_vals, s_vals, perimeter = get_arc_lengths(a, b)
+    m = perimeter / (math.pi * NUM_TEETH)
+    pitch = perimeter / NUM_TEETH
+    
+    FreeCAD.Console.PrintMessage(f"Generating Elliptical Gear:\n")
+    FreeCAD.Console.PrintMessage(f"- Perimeter: {perimeter:.2f} mm\n")
+    FreeCAD.Console.PrintMessage(f"- Calculated Module: {m:.3f}\n")
+    
+    global_points = []
+    
+    # 2. Generate point array along the ellipse
+    for k in range(NUM_TEETH):
+        S_k = k * pitch
+        t_k = interp(S_k, t_vals, s_vals)
+        
+        # Position on ellipse
+        Px = a * math.cos(t_k)
+        Py = b * math.sin(t_k)
+        P = FreeCAD.Vector(Px, Py, 0)
+        
+        # Derivatives for tangent and normal
+        dx = -a * math.sin(t_k)
+        dy = b * math.cos(t_k)
+        len_d = math.sqrt(dx**2 + dy**2)
+        
+        # Unit Tangent and Unit Normal vectors
+        T = FreeCAD.Vector(dx / len_d, dy / len_d, 0)
+        N = FreeCAD.Vector(dy / len_d, -dx / len_d, 0) # Outward pointing
+        
+        # Local radius of curvature
+        Rc = (a**2 * math.sin(t_k)**2 + b**2 * math.cos(t_k)**2)**1.5 / (a * b)
+        
+        # Get localized tooth profile based on curvature
+        pts_local = get_tooth_points(Rc, m, PRESSURE_ANGLE, pitch)
+        
+        # Transform local tooth points to global elliptical curve
+        for pt in pts_local:
+            P_glob = P + (pt.x * T) + (pt.y * N)
+            global_points.append(P_glob)
+            
+    # Close the geometry perimeter loop
+    global_points.append(global_points[0])
+    
+    # 3. Create the FreeCAD Geometry
+    doc = FreeCAD.activeDocument()
+    if doc is None:
+        doc = FreeCAD.newDocument("Elliptical_Gear")
+        
+    doc.openTransaction("Create Elliptical Gear")
+    
+    try:
+        # Create base gear contour and solid
+        wire = Part.makePolygon(global_points)
+        face = Part.Face(wire)
+        gear_solid = face.extrude(FreeCAD.Vector(0, 0, THICKNESS))
+        
+        # Create and subtract center bore
+        bore_cyl = Part.makeCylinder(BORE_RADIUS, THICKNESS)
+        bore_cyl.Placement = FreeCAD.Placement(FreeCAD.Vector(0,0,0), FreeCAD.Rotation(0,0,0))
+        final_solid = gear_solid.cut(bore_cyl)
+        
+        # Add to document
+        obj = doc.addObject("Part::Feature", "EllipticalGear")
+        obj.Shape = final_solid
+        
+    except Exception as e:
+        FreeCAD.Console.PrintError(f"Failed to build gear geometry: {e}\n")
+    finally:
+        doc.commitTransaction()
+        doc.recompute()
+        FreeCAD.Gui.SendMsgToActiveView("ViewFit")
+
+if __name__ == "__main__":
+    main()

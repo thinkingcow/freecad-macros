@@ -1,0 +1,159 @@
+# rotate and duplicate an object around the center of a second object
+import FreeCAD as App
+import FreeCADGui as Gui
+import math
+
+# FreeCAD 1.0 and 1.1 use PySide6. Fallbacks included for older versions.
+try:
+    from PySide6 import QtWidgets
+except ImportError:
+    try:
+        from PySide2 import QtWidgets
+    except ImportError:
+        from PySide import QtGui as QtWidgets
+
+class RadialDuplicateDialog(QtWidgets.QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Radial Duplicate")
+        self.setMinimumWidth(300)
+        
+        # Main layout
+        layout = QtWidgets.QVBoxLayout(self)
+        
+        # 1. Plane Selection Menu
+        plane_layout = QtWidgets.QHBoxLayout()
+        plane_label = QtWidgets.QLabel("Rotation Plane:")
+        self.plane_combo = QtWidgets.QComboBox()
+        self.plane_combo.addItems(["X-Y Plane", "Y-Z Plane", "Z-X Plane"])
+        plane_layout.addWidget(plane_label)
+        plane_layout.addWidget(self.plane_combo)
+        layout.addLayout(plane_layout)
+        
+        # 2. Number of Duplicates Spinner
+        count_layout = QtWidgets.QHBoxLayout()
+        count_label = QtWidgets.QLabel("Number of Duplicates:")
+        self.count_spinbox = QtWidgets.QSpinBox()
+        self.count_spinbox.setRange(1, 999)
+        self.count_spinbox.setValue(3)
+        count_layout.addWidget(count_label)
+        count_layout.addWidget(self.count_spinbox)
+        layout.addLayout(count_layout)
+        
+        # 3. OK / Cancel Buttons
+        self.button_box = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
+        )
+        self.button_box.accepted.connect(self.accept)
+        self.button_box.rejected.connect(self.reject)
+        layout.addWidget(self.button_box)
+        
+    def get_values(self):
+        return self.plane_combo.currentText(), self.count_spinbox.value()
+
+
+def run_radial_duplicate_by_plane():
+    # 1. Check Selection
+    sel = Gui.Selection.getSelection()
+    if len(sel) != 2:
+        QtWidgets.QMessageBox.warning(
+            None, 
+            "Selection Error", 
+            "Please select exactly 2 objects in the 3D view.\n\n"
+            "1st object: The Center of Rotation\n"
+            "2nd object: The Object to Duplicate"
+        )
+        return
+
+    obj1_center = sel[0]
+    obj2_target = sel[1]
+
+    # Ensure the target object actually has a placement (is a 3D object)
+    if not hasattr(obj2_target, "Placement"):
+        QtWidgets.QMessageBox.warning(None, "Error", "The second object cannot be moved (no Placement property found).")
+        return
+
+    # 2. Determine the center of rotation from the first object
+    if hasattr(obj1_center, "Shape") and not obj1_center.Shape.isNull():
+        # Bounding box center provides the true geometric center of the shape
+        center = obj1_center.Shape.BoundBox.Center
+    elif hasattr(obj1_center, "Placement"):
+        # Fallback to the origin point of the object if it has no standard shape
+        center = obj1_center.Placement.Base
+    else:
+        QtWidgets.QMessageBox.warning(None, "Error", "The first object must have a Shape or Placement to define a center.")
+        return
+
+    # 3. Show the custom dialog to get both inputs at once
+    # Attach it to FreeCAD's main window so it behaves correctly
+    main_window = Gui.getMainWindow()
+    dialog = RadialDuplicateDialog(main_window)
+    
+    # PySide6 prefers exec(), PySide2 uses exec_(). This handles both safely.
+    if hasattr(dialog, 'exec'):
+        result = dialog.exec()
+    else:
+        result = dialog.exec_()
+        
+    if result != QtWidgets.QDialog.Accepted:
+        return # User clicked Cancel
+        
+    plane_str, count = dialog.get_values()
+
+    # Map the selected plane to its normal vector (the axis of rotation)
+    axis_vec = App.Vector(0, 0, 1)  # Default to Z-axis (for X-Y plane)
+    if plane_str.startswith("Y-Z"):
+        axis_vec = App.Vector(1, 0, 0)  # Rotate around X-axis
+    elif plane_str.startswith("Z-X"):
+        axis_vec = App.Vector(0, 1, 0)  # Rotate around Y-axis
+
+    # 4. Math Setup
+    total_items = count + 1
+    angle_step = 360.0 / total_items
+    
+    doc = App.ActiveDocument
+    
+    # Open a single transaction so the whole array can be undone with one Ctrl+Z
+    doc.openTransaction("Radial Duplicate Array")
+
+    try:
+        orig_plc = obj2_target.Placement
+        
+        for i in range(1, total_items):
+            current_angle = i * angle_step
+            
+            # Define the rotation matrix for this step
+            rot = App.Rotation(axis_vec, current_angle)
+            
+            # Create an App::Link instead of a disconnected copy. 
+            # This ensures property changes on the parent propagate to the clones.
+            new_obj = doc.addObject("App::Link", obj2_target.Name + "_link")
+            new_obj.LinkedObject = obj2_target
+            
+            # Calculate the new positional translation (Base)
+            v_offset = orig_plc.Base - center
+            
+            # Rotate the vector around the origin by the current angle
+            v_rotated = rot.multVec(v_offset)
+            
+            # Add the center back to place it in global space
+            new_base = center + v_rotated
+            
+            # Calculate the new rotation mapping to keep the same face pointing inward
+            new_rot = rot.multiply(orig_plc.Rotation)
+            
+            # Apply the combined positional base and rotation mapping to the copied object
+            new_obj.Placement = App.Placement(new_base, new_rot)
+            
+        doc.commitTransaction()
+        doc.recompute()
+        
+        # Clean up selection and just select the original center object for convenience
+        Gui.Selection.clearSelection()
+        
+    except Exception as e:
+        doc.abortTransaction()
+        QtWidgets.QMessageBox.critical(None, "Error", f"An error occurred while creating duplicates:\n{str(e)}")
+
+# Execute the main function
+run_radial_duplicate_by_plane()

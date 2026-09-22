@@ -1,0 +1,63 @@
+# make an "Allen key"
+import FreeCAD as App
+import Part
+import math
+
+class AllenWrenchCutout:
+    def __init__(self, obj):
+        # Link the Python class to the FreeCAD object
+        obj.Proxy = self
+        
+        # Add custom adjustable properties to the Data tab
+        obj.addProperty("App::PropertyLength", "WrenchSize", "Allen Wrench", 
+                        "Standard size of the Allen wrench across the flats (e.g., 5mm)").WrenchSize = 5.0
+                        
+        obj.addProperty("App::PropertyLength", "Clearance", "Allen Wrench", 
+                        "Extra clearance so the real wrench actually fits (e.g., 0.2mm for 3D printing)").Clearance = 0.2
+                        
+        obj.addProperty("App::PropertyLength", "Depth", "Allen Wrench", 
+                        "Total length/depth of the hexagonal cutout").Depth = 10.0
+
+    def execute(self, obj):
+        # Calculate the actual flat-to-flat distance needed
+        s = obj.WrenchSize + obj.Clearance
+        
+        # Calculate the circumscribed radius (distance from center to vertices)
+        # Radius = (Flat_to_Flat / 2) / cos(30 degrees)
+        r = (s / 2.0) / math.cos(math.radians(30))
+        
+        # Generate the 6 points of the hexagon
+        points = []
+        for i in range(6):
+            angle = math.radians(i * 60)
+            x = r * math.cos(angle)
+            y = r * math.sin(angle)
+            points.append(App.Vector(x, y, 0))
+        points.append(points[0]) # Close the polygon loop
+        
+        # Create the 2D face from the points
+        polygon = Part.makePolygon(points)
+        face = Part.Face(polygon)
+        
+        # Extrude the face into a 3D solid cylinder
+        extrusion = face.extrude(App.Vector(0, 0, obj.Depth))
+        
+        # Assign the resulting solid shape to the FreeCAD object
+        obj.Shape = extrusion
+
+def create_allen_cutout():
+    # Get the active document, or create a new one if none exists
+    doc = App.ActiveDocument
+    if doc is None:
+        doc = App.newDocument()
+        
+    # Create the custom object
+    obj = doc.addObject("Part::FeaturePython", "AllenWrenchHole")
+    AllenWrenchCutout(obj)
+    
+    # Use the default Part view provider (renders as a standard 3D solid)
+    obj.ViewObject.Proxy = 0
+    doc.recompute()
+
+if __name__ == "__main__":
+    create_allen_cutout()

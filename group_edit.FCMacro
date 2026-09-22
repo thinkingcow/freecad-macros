@@ -1,0 +1,209 @@
+# edit a property for all objects with a specified label name (subset) via linked variable
+import FreeCAD
+import json
+import re
+
+# Dynamically import PySide based on the FreeCAD version
+try:
+    from PySide6 import QtWidgets, QtCore
+except ImportError:
+    try:
+        from PySide2 import QtWidgets, QtCore
+    except ImportError:
+        from PySide import QtGui as QtWidgets
+        from PySide import QtCore
+
+class BatchPropertyDialog(QtWidgets.QDialog):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Batch Link Properties to Variable")
+        self.resize(350, 180)
+        
+        # Access FreeCAD's parameter system to store macro preferences persistently
+        self.param_group = FreeCAD.ParamGet("User parameter:BaseApp/Preferences/Macros/BatchUpdateProperties")
+        
+        # Create form layout
+        layout = QtWidgets.QFormLayout(self)
+        
+        # Name Substring field (Editable ComboBox)
+        self.substring_input = self.create_history_combobox("SubstringHistory", "Gear")
+        layout.addRow("Object Label Substring:", self.substring_input)
+        
+        # Property Name field (Editable ComboBox)
+        self.property_input = self.create_history_combobox("PropertyHistory", "beta")
+        layout.addRow("Property Name:", self.property_input)
+        
+        # Initial Value field (Editable ComboBox)
+        self.value_input = self.create_history_combobox("ValueHistory", "15 deg")
+        layout.addRow("Initial Linked Value:", self.value_input)
+        
+        # Use Label checkbox
+        self.label_checkbox = QtWidgets.QCheckBox()
+        self.label_checkbox.setChecked(True)
+        layout.addRow("Match Label (vs Name):", self.label_checkbox)
+        
+        # Standard OK/Cancel buttons
+        self.buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
+            QtCore.Qt.Horizontal, self
+        )
+        layout.addRow(self.buttons)
+        
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+
+    def get_history(self, key):
+        """Retrieve history list from FreeCAD parameters."""
+        history_str = self.param_group.GetString(key, "[]")
+        try:
+            history = json.loads(history_str)
+            if not isinstance(history, list):
+                history = []
+        except Exception:
+            history = []
+        return history
+
+    def create_history_combobox(self, key, default_val):
+        """Helper to build an editable combobox pre-filled with past history."""
+        combo = QtWidgets.QComboBox()
+        combo.setEditable(True)
+        combo.setInsertPolicy(QtWidgets.QComboBox.NoInsert) 
+        
+        history = self.get_history(key)
+        if history:
+            combo.addItems(history)
+            combo.setCurrentText(history[0])
+        else:
+            combo.addItem(default_val)
+            combo.setCurrentText(default_val)
+            
+        return combo
+
+    def save_history(self, key, value, max_items=10):
+        """Save a new value to the history, bringing it to the top."""
+        if not value.strip():
+            return
+            
+        history = self.get_history(key)
+        
+        if value in history:
+            history.remove(value)
+        history.insert(0, value)
+        
+        history = history[:max_items]
+        self.param_group.SetString(key, json.dumps(history))
+        
+    def save_all_histories(self):
+        """Save the current text of all inputs to history."""
+        self.save_history("SubstringHistory", self.substring_input.currentText())
+        self.save_history("PropertyHistory", self.property_input.currentText())
+        self.save_history("ValueHistory", self.value_input.currentText())
+
+def run_macro():
+    doc = FreeCAD.ActiveDocument
+    if not doc:
+        FreeCAD.Console.PrintError("No active document found.\n")
+        return
+
+    dialog = BatchPropertyDialog()
+    if dialog.exec_() != QtWidgets.QDialog.Accepted:
+        FreeCAD.Console.PrintMessage("Macro canceled by user.\n")
+        return
+        
+    dialog.save_all_histories()
+        
+    name_substring = dialog.substring_input.currentText()
+    property_name = dialog.property_input.currentText()
+    raw_value = dialog.value_input.currentText()
+    use_label = dialog.label_checkbox.isChecked()
+    
+    doc.RecomputesFrozen = True
+    doc.openTransaction("Batch Link Properties via Expression")
+    
+    # 1. Collect all matching objects and determine the original property type
+    matched_objects = []
+    prop_type = None
+    
+    for obj in doc.Objects:
+        identifier = obj.Label if use_label else obj.Name
+        
+        if name_substring in identifier:
+            if hasattr(obj, property_name):
+                matched_objects.append((obj, identifier))
+                
+                # Capture the precise property type (e.g., 'App::PropertyAngle') from the first match
+                if not prop_type:
+                    prop_type = obj.getTypeIdOfProperty(property_name)
+                    
+    if not matched_objects:
+        FreeCAD.Console.PrintError(f"No objects found matching '{name_substring}' with property '{property_name}'.\n")
+        doc.abortTransaction()
+        doc.RecomputesFrozen = False
+        return
+
+    # 2. Type-cast the user input intelligently based on the target property type
+    new_value = raw_value
+    if prop_type == 'App::PropertyBool':
+        new_value = str(raw_value).strip().lower() in ['true', 'yes', 'on', '1']
+    elif prop_type == 'App::PropertyString':
+        new_value = str(raw_value)
+    else:
+        try:
+            # Try FreeCAD Quantity first to handle units (e.g., "15 deg" or "10 mm")
+            qty = FreeCAD.Units.Quantity(raw_value)
+            # If it's unitless but target expects an int/float
+            if qty.Unit.Signature == (0,0,0,0,0,0,0,0) and prop_type in ['App::PropertyFloat', 'App::PropertyInteger']:
+                new_value = int(qty.Value) if prop_type == 'App::PropertyInteger' else float(qty.Value)
+            else:
+                new_value = qty
+        except Exception:
+            # Fallback to standard python conversions
+            try:
+                new_value = float(raw_value) if "." in raw_value else int(raw_value)
+            except ValueError:
+                pass
+    
+    # 3. Find or Create the VarSet (the native FreeCAD 1.0+ variables container)
+    varset_name = "Variables"
+    varset = doc.getObject(varset_name)
+    if not varset or not varset.isDerivedFrom("App::VarSet"):
+        varset = doc.addObject("App::VarSet", varset_name)
+        varset.Label = "Linked Variables"
+        
+    # 4. Generate a clean, expression-safe variable name
+    safe_substring = re.sub(r'\W', '_', name_substring)
+    var_name = f"{safe_substring}_{property_name}"
+    
+    # Property names cannot start with a digit
+    if var_name[0].isdigit():
+        var_name = "Var_" + var_name
+        
+    # 5. Add the newly constructed variable to the VarSet if it doesn't exist
+    if not hasattr(varset, var_name):
+        varset.addProperty(prop_type, var_name, "Batch Linked")
+        
+    # 6. Initialize the master variable's value
+    try:
+        setattr(varset, var_name, new_value)
+    except Exception as e:
+        FreeCAD.Console.PrintError(f"Could not set initial VarSet value: {e}\n")
+    
+    # 7. Use the Expression Engine to link every matched object to the new variable
+    count = 0
+    for obj, identifier in matched_objects:
+        try:
+            # E.g., "Variables.Gear_beta"
+            expression = f"{varset.Name}.{var_name}" 
+            obj.setExpression(property_name, expression)
+            FreeCAD.Console.PrintMessage(f"Linked {identifier}.{property_name} to {expression}\n")
+            count += 1
+        except Exception as e:
+            FreeCAD.Console.PrintWarning(f"Could not link {identifier}.{property_name}: {e}\n")
+                    
+    doc.commitTransaction()
+    doc.recompute()
+    
+    FreeCAD.Console.PrintMessage(f"Finished. Linked {count} object(s) to '{varset.Name}.{var_name}'.\n")
+
+# Run the macro
+run_macro()
