@@ -2,7 +2,7 @@
 I've been using Freecad to design objects to be 3D printed.  I find Freecad to be powerful but confusing, 
 as it's model of operation often conflicts with mine.  I've asked Gemini to create macros for me that provide convenient 
 operations for the projects I am building.  Sometimes they replicate  built-in capabilities, but in a form that makes more
-sense to me; other times they are specific to a particular problem.
+sense to me; other times they are specific to a particular project.
 
 I am keeping them here for my future use.  If anyone else finds them useful, then that is an added benefit.  In general,
 If I need to modify a macro, I upload it to Gemini along with a  prompt for the modification.  So far, the only "my hand" 
