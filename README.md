@@ -5,12 +5,12 @@ operations for the projects I am building.  Sometimes they replicate  built-in c
 sense to me; other times they are specific to a particular project.
 
 I am keeping them here for my future use.  If anyone else finds them useful, then that is an added benefit.  In general,
-If I need to modify a macro, I upload it to Gemini along with a  prompt for the modification.  So far, the only "my hand" 
+If I need to modify a macro, I upload it to Gemini along with a  prompt for the modification.  So far, the only "by hand" 
 modifications I've made are changes to the UI messages.
 
 ## Macros
 - **allenkey**.  creates a 6-sided cylinder that can be subtracted from  a solid object to allow a standard Allen key to fit
-            in the resultant cavity.  You specify the standard `key size` , `depth`, and `clearance`.
+            in the resultant cavity.  You specify the standard `key size`, `depth`, and `clearance`.
 - **dup_around**.  Duplicates an object in a radial pattern around a reference object.  You specify the number of duplicates,
                   which are placed uniformly in a circle around the reference object, in the specified plane.  Changing a property of the original
                   object causes the equivalent properties of the duplicated objects to stay in sync.
