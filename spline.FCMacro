@@ -1,8 +1,7 @@
 import FreeCAD
 import Part
 import math
-import sys
-import types
+import __main__
 
 # Handle FreeCAD's PySide version transitions (FreeCAD 1.1 uses PySide6)
 try:
@@ -139,18 +138,15 @@ class ViewProviderSplinedCylinder:
         self.__dict__.update(state)
 
 
-# --- SYNTHETIC MODULE FIX ---
-# Create a synthetic module named after spline2.FCMacro to bypass FreeCAD's local macro execution[cite: 1].
-# This forces the pickle module to map the classes correctly when duplicating the object.
-if "spline2" not in sys.modules:
-    sys.modules["spline2"] = types.ModuleType("spline2")
+# --- MACRO COPY/PASTE REGISTRATION ---
+# Explicitly inject classes into Python's global __main__ namespace and 
+# force their __module__ paths to match, satisfying FreeCAD's default unpickler.
+__main__.SplinedCylinderFeature = SplinedCylinderFeature
+__main__.ViewProviderSplinedCylinder = ViewProviderSplinedCylinder
 
-sys.modules["spline2"].SplinedCylinderFeature = SplinedCylinderFeature
-sys.modules["spline2"].ViewProviderSplinedCylinder = ViewProviderSplinedCylinder
-
-SplinedCylinderFeature.__module__ = "spline2"
-ViewProviderSplinedCylinder.__module__ = "spline2"
-# ----------------------------
+SplinedCylinderFeature.__module__ = "__main__"
+ViewProviderSplinedCylinder.__module__ = "__main__"
+# -------------------------------------
 
 
 class SplineDialog(QtWidgets.QDialog):
