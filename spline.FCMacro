@@ -1,7 +1,8 @@
-# make a cylinder with splines to facilitate a tighter fit for 3D printed parts
 import FreeCAD
 import Part
 import math
+import sys
+import types
 
 # Handle FreeCAD's PySide version transitions (FreeCAD 1.1 uses PySide6)
 try:
@@ -16,7 +17,6 @@ except ImportError:
 class SplinedCylinderFeature:
     """The Proxy class for our custom parametric FreeCAD object"""
     def __init__(self, obj, radius, height, num_splines, protrusion, width, offset):
-        # Define the properties first, then assign the values.
         obj.addProperty("App::PropertyLength", "Radius", "Spline Parameters", "Radius of the base cylinder")
         obj.Radius = radius
         
@@ -26,7 +26,7 @@ class SplinedCylinderFeature:
         obj.addProperty("App::PropertyInteger", "NumSplines", "Spline Parameters", "Number of splines")
         obj.NumSplines = num_splines
         
-        obj.addProperty("App::PropertyLength", "Protrusion", "Spline Parameters", "Protrusion (+ for outward, - for inward)")
+        obj.addProperty("App::PropertyDistance", "Protrusion", "Spline Parameters", "Protrusion (+ for outward, - for inward)")
         obj.Protrusion = protrusion
         
         obj.addProperty("App::PropertyLength", "SplineWidth", "Spline Parameters", "Width of each spline")
@@ -38,8 +38,6 @@ class SplinedCylinderFeature:
         obj.Proxy = self
 
     def execute(self, obj):
-        """This method runs every time a property is changed in the property view"""
-        # Extract values (Handling FreeCAD's Quantity objects using .Value)
         radius = obj.Radius.Value
         height = obj.Height.Value
         num_splines = obj.NumSplines
@@ -47,17 +45,13 @@ class SplinedCylinderFeature:
         width = obj.SplineWidth.Value
         offset = obj.Offset.Value
         
-        # Create the base cylinder geometry
         cyl = Part.makeCylinder(radius, height)
         
         if protrusion == 0 or num_splines <= 0:
             obj.Shape = cyl
             return
             
-        # Prevent the offset from completely missing the cylinder
         offset = max(0.0, min(offset, height - 0.01))
-        
-        # Calculate geometric overlaps to ensure clean boolean operations
         overlap = max(1.0, abs(protrusion))
         
         if protrusion > 0:
@@ -73,13 +67,11 @@ class SplinedCylinderFeature:
         z_chamfer = offset + abs(protrusion)
         z_end = height
         
-        # Handle edge case where chamfer length exceeds cylinder height
         if z_chamfer > height:
             ratio = (height - offset) / abs(protrusion)
             x_full = radius + protrusion * ratio
             z_chamfer = height
             
-        # Build the 2D cross-section profile of the spline
         pts = []
         pts.append(FreeCAD.Vector(x_overlap, 0, z_start))
         pts.append(FreeCAD.Vector(x_flush, 0, z_start))
@@ -94,11 +86,9 @@ class SplinedCylinderFeature:
         poly = Part.makePolygon(pts)
         face = Part.Face(poly)
         
-        # Extrude to create the 3D spline tool and center it
         spline_tool = face.extrude(FreeCAD.Vector(0, width, 0))
         spline_tool.translate(FreeCAD.Vector(0, -width / 2.0, 0))
         
-        # Generate the circular array of splines
         tools = []
         for i in range(num_splines):
             angle = (360.0 / num_splines) * i
@@ -106,7 +96,6 @@ class SplinedCylinderFeature:
             tool.rotate(FreeCAD.Vector(0,0,0), FreeCAD.Vector(0,0,1), angle)
             tools.append(tool)
             
-        # Execute Boolean operations
         if protrusion > 0:
             final_shape = cyl
             for t in tools:
@@ -115,15 +104,14 @@ class SplinedCylinderFeature:
             comp = Part.makeCompound(tools)
             final_shape = cyl.cut(comp)
             
-        # Refine the shape and assign it to the object
         final_shape = final_shape.removeSplitter()
         obj.Shape = final_shape
 
     def __getstate__(self):
-        return None
+        return self.__dict__
 
     def __setstate__(self, state):
-        return None
+        self.__dict__.update(state)
 
 
 class ViewProviderSplinedCylinder:
@@ -142,10 +130,27 @@ class ViewProviderSplinedCylinder:
         return ""
 
     def __getstate__(self):
-        return None
+        state = self.__dict__.copy()
+        state.pop("ViewObject", None)
+        state.pop("Object", None)
+        return state
 
     def __setstate__(self, state):
-        return None
+        self.__dict__.update(state)
+
+
+# --- SYNTHETIC MODULE FIX ---
+# Create a synthetic module named after spline2.FCMacro to bypass FreeCAD's local macro execution[cite: 1].
+# This forces the pickle module to map the classes correctly when duplicating the object.
+if "spline2" not in sys.modules:
+    sys.modules["spline2"] = types.ModuleType("spline2")
+
+sys.modules["spline2"].SplinedCylinderFeature = SplinedCylinderFeature
+sys.modules["spline2"].ViewProviderSplinedCylinder = ViewProviderSplinedCylinder
+
+SplinedCylinderFeature.__module__ = "spline2"
+ViewProviderSplinedCylinder.__module__ = "spline2"
+# ----------------------------
 
 
 class SplineDialog(QtWidgets.QDialog):
@@ -207,7 +212,6 @@ class SplineDialog(QtWidgets.QDialog):
 def main():
     dialog = SplineDialog()
     
-    # Compatibility execution handling
     exec_method = getattr(dialog, "exec", dialog.exec_)
     if exec_method():
         vals = dialog.get_values()
@@ -216,10 +220,8 @@ def main():
         if doc is None:
             doc = FreeCAD.newDocument()
             
-        # Create the FeaturePython object instead of a static shape
         part = doc.addObject("Part::FeaturePython", "SplinedCylinder")
         
-        # Attach our python proxies
         SplinedCylinderFeature(
             part, 
             vals["radius"], 
@@ -231,7 +233,6 @@ def main():
         )
         ViewProviderSplinedCylinder(part.ViewObject)
         
-        # Recompute to draw the initial shape and fit the view
         doc.recompute()
         FreeCAD.Gui.SendMsgToActiveView("ViewFit")
 
