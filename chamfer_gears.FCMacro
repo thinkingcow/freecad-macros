@@ -1,0 +1,326 @@
+import math
+import FreeCAD as App
+import FreeCADGui as Gui
+import Part
+
+# Qt Binding fallback for PySide6 (FreeCAD 1.1 default) / PySide2 / PySide
+try:
+    from PySide6 import QtCore, QtWidgets
+except ImportError:
+    try:
+        from PySide2 import QtCore, QtWidgets
+    except ImportError:
+        from PySide import QtCore, QtWidgets
+
+
+def get_property_value(obj, property_names):
+    """Retrieves a numeric float value for the first matching property name on an object."""
+    if not obj:
+        return None
+    for name in property_names:
+        if hasattr(obj, name):
+            val = getattr(obj, name)
+            if hasattr(val, "Value"):  # Quantity object
+                return float(val.Value)
+            try:
+                return float(val)
+            except (ValueError, TypeError):
+                pass
+    return None
+
+
+class GearSelectionDialog(QtWidgets.QDialog):
+    """Dialog displaying gear selection list, chamfer size, and side options."""
+
+    def __init__(self, gear_objects, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Select Gears & Chamfer Options")
+        self.resize(400, 400)
+
+        layout = QtWidgets.QVBoxLayout(self)
+
+        label = QtWidgets.QLabel("Select one or more gears to chamfer:")
+        layout.addWidget(label)
+
+        # List widget with checkable gear items
+        self.list_widget = QtWidgets.QListWidget()
+        for obj in gear_objects:
+            item = QtWidgets.QListWidgetItem(obj.Label)
+            item.setFlags(item.flags() | QtCore.Qt.ItemIsUserCheckable)
+            item.setCheckState(QtCore.Qt.Checked)  # Default all checked
+            item.setData(QtCore.Qt.UserRole, obj)
+            self.list_widget.addItem(item)
+        layout.addWidget(self.list_widget)
+
+        # Select All / Deselect All convenience buttons
+        btn_layout = QtWidgets.QHBoxLayout()
+        select_all_btn = QtWidgets.QPushButton("Select All")
+        deselect_all_btn = QtWidgets.QPushButton("Deselect All")
+        select_all_btn.clicked.connect(lambda: self.set_all_checked(True))
+        deselect_all_btn.clicked.connect(lambda: self.set_all_checked(False))
+        btn_layout.addWidget(select_all_btn)
+        btn_layout.addWidget(deselect_all_btn)
+        layout.addLayout(btn_layout)
+
+        # Side selection dropdown
+        side_layout = QtWidgets.QHBoxLayout()
+        side_layout.addWidget(QtWidgets.QLabel("Chamfer Side:"))
+        self.side_combo = QtWidgets.QComboBox()
+        self.side_combo.addItems(["Both (Top & Bottom)", "Top Only", "Bottom Only"])
+        side_layout.addWidget(self.side_combo)
+        layout.addLayout(side_layout)
+
+        # Chamfer size input field
+        size_layout = QtWidgets.QHBoxLayout()
+        size_layout.addWidget(QtWidgets.QLabel("Chamfer Size (mm):"))
+        self.chamfer_spin = QtWidgets.QDoubleSpinBox()
+        self.chamfer_spin.setRange(0.01, 100.0)
+        self.chamfer_spin.setValue(1.0)
+        self.chamfer_spin.setDecimals(2)
+        self.chamfer_spin.setSingleStep(0.25)
+        size_layout.addWidget(self.chamfer_spin)
+        layout.addLayout(size_layout)
+
+        # OK / Cancel buttons
+        button_box = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
+        )
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+
+    def set_all_checked(self, checked):
+        state = QtCore.Qt.Checked if checked else QtCore.Qt.Unchecked
+        for i in range(self.list_widget.count()):
+            self.list_widget.item(i).setCheckState(state)
+
+    def get_selected_gears(self):
+        selected = []
+        for i in range(self.list_widget.count()):
+            item = self.list_widget.item(i)
+            if item.checkState() == QtCore.Qt.Checked:
+                selected.append(item.data(QtCore.Qt.UserRole))
+        return selected
+
+    def get_chamfer_size(self):
+        return self.chamfer_spin.value()
+
+    def get_chamfer_side(self):
+        txt = self.side_combo.currentText()
+        if "Top" in txt and "Bottom" in txt:
+            return "Both"
+        elif "Top" in txt:
+            return "Top"
+        else:
+            return "Bottom"
+
+
+def process_gear(doc, gear_obj, chamfer_size, chamfer_side):
+    """Applies chamfer intersection logic to a single gear object taking global placement into account."""
+    is_ring_gear = "Ring" in gear_obj.Label
+
+    # Derive corresponding VarSet label
+    varset_label = (
+        gear_obj.Label[:-5] + "_values"
+        if gear_obj.Label.endswith("_Body")
+        else gear_obj.Label + "_values"
+    )
+
+    # Search document for matching VarSet
+    varset_obj = None
+    for obj in doc.Objects:
+        if obj.Label == varset_label or obj.Name == varset_label:
+            varset_obj = obj
+            break
+
+    if not varset_obj:
+        return False, f"Missing VarSet '{varset_label}' for gear '{gear_obj.Label}'"
+
+    height_keys = ["Height", "height"]
+    outer_dia_keys = ["OuterDiameter", "outerDiameter", "Outer_Diameter", "outer_diameter"]
+    inner_dia_keys = ["InnerDiameter", "innerDiameter", "Inner_Diameter", "inner_diameter"]
+
+    # Fetch dimensions
+    height = get_property_value(varset_obj, height_keys) or get_property_value(
+        gear_obj, height_keys
+    )
+    outer_diameter = get_property_value(
+        varset_obj, outer_dia_keys
+    ) or get_property_value(gear_obj, outer_dia_keys)
+
+    inner_diameter = None
+    if is_ring_gear:
+        inner_diameter = get_property_value(
+            varset_obj, inner_dia_keys
+        ) or get_property_value(gear_obj, inner_dia_keys)
+
+    if height is None or outer_diameter is None or (is_ring_gear and inner_diameter is None):
+        return False, f"Missing required dimension properties in '{varset_label}'"
+
+    # Validate chamfer size limits
+    max_height_limit = height - 0.01 if chamfer_side != "Both" else height / 2.0
+    if is_ring_gear:
+        wall_thickness = (outer_diameter - inner_diameter) / 2.0
+        max_chamfer = min(max_height_limit, wall_thickness - 0.01, inner_diameter / 2.0 - 0.01)
+    else:
+        max_chamfer = min(max_height_limit, outer_diameter / 2.0 - 0.01)
+
+    if chamfer_size > max_chamfer:
+        return (
+            False,
+            f"Chamfer size ({chamfer_size} mm) exceeds maximum allowable ({max_chamfer:.2f} mm) for '{gear_obj.Label}'",
+        )
+
+    # Fetch gear placement
+    placement = (
+        gear_obj.getGlobalPlacement()
+        if hasattr(gear_obj, "getGlobalPlacement")
+        else gear_obj.Placement
+    )
+
+    # Calculate global coordinates of local Z=0 (bottom) and Z=height (top) face centers
+    global_local_bottom = placement.multVec(App.Vector(0, 0, 0))
+    global_local_top = placement.multVec(App.Vector(0, 0, height))
+
+    # Build base cutting shape in local space
+    if is_ring_gear:
+        outer_r = outer_diameter / 2.0
+        inner_r = inner_diameter / 2.0
+
+        outer_cyl = Part.makeCylinder(outer_r, height)
+        inner_cyl = Part.makeCylinder(inner_r, height)
+        tube_shape = outer_cyl.cut(inner_cyl)
+
+        all_inner_edges = [
+            e
+            for e in tube_shape.Edges
+            if isinstance(e.Curve, Part.Circle)
+            and math.isclose(e.Curve.Radius, inner_r, abs_tol=1e-3)
+        ]
+
+        local_top_edges = [
+            e for e in all_inner_edges if math.isclose(e.Curve.Center.z, height, abs_tol=1e-3)
+        ]
+        local_bottom_edges = [
+            e for e in all_inner_edges if math.isclose(e.Curve.Center.z, 0.0, abs_tol=1e-3)
+        ]
+    else:
+        radius = outer_diameter / 2.0
+        cyl_shape = Part.makeCylinder(radius, height)
+
+        all_edges = [e for e in cyl_shape.Edges if isinstance(e.Curve, Part.Circle)]
+
+        local_top_edges = [
+            e for e in all_edges if math.isclose(e.Curve.Center.z, height, abs_tol=1e-3)
+        ]
+        local_bottom_edges = [
+            e for e in all_edges if math.isclose(e.Curve.Center.z, 0.0, abs_tol=1e-3)
+        ]
+
+    # Map local edge groups to physical world Top and Bottom based on global Z position
+    if global_local_top.z >= global_local_bottom.z:
+        world_top_edges = local_top_edges
+        world_bottom_edges = local_bottom_edges
+    else:
+        # Gear is inverted (e.g., rotated 180° around X or Y axis)
+        world_top_edges = local_bottom_edges
+        world_bottom_edges = local_top_edges
+
+    # Select target edges matching the user option
+    if chamfer_side == "Top":
+        target_edges = world_top_edges
+    elif chamfer_side == "Bottom":
+        target_edges = world_bottom_edges
+    else:  # "Both"
+        target_edges = world_top_edges + world_bottom_edges
+
+    if not target_edges:
+        return False, f"Failed identifying {chamfer_side.lower()} edge(s) on '{gear_obj.Label}'"
+
+    # Apply chamfer to local cutter shape
+    if is_ring_gear:
+        cutter_shape = tube_shape.makeChamfer(chamfer_size, target_edges)
+    else:
+        cutter_shape = cyl_shape.makeChamfer(chamfer_size, target_edges)
+
+    # Align cutter shape with gear's final global placement
+    cutter_shape.Placement = placement
+
+    # Perform boolean intersection
+    intersected_shape = gear_obj.Shape.common(cutter_shape)
+
+    # Create new feature object
+    res_name = f"{gear_obj.Name}_chamfered"
+    res_label = f"{gear_obj.Label}_chamfered"
+
+    res_obj = doc.addObject("Part::Feature", res_name)
+    res_obj.Label = res_label
+    res_obj.Shape = intersected_shape
+
+    # Hide original object
+    if hasattr(gear_obj, "ViewObject") and gear_obj.ViewObject:
+        gear_obj.ViewObject.Visibility = False
+
+    return True, None
+
+
+def main():
+    doc = App.ActiveDocument
+    if not doc:
+        QtWidgets.QMessageBox.warning(None, "Macro Error", "No active document found.")
+        return
+
+    # Identify all gear objects containing "Gear" in their label and ending with "_Body"
+    gear_objects = [
+        obj for obj in doc.Objects if "Gear" in obj.Label and obj.Label.endswith("_Body")
+    ]
+
+    if not gear_objects:
+        QtWidgets.QMessageBox.information(
+            None,
+            "No Gears Found",
+            "No objects containing 'Gear' and ending with '_Body' were found in the active document.",
+        )
+        return
+
+    # Prompt user with dialog
+    dialog = GearSelectionDialog(gear_objects)
+    if dialog.exec_() != QtWidgets.QDialog.Accepted:
+        return
+
+    selected_gears = dialog.get_selected_gears()
+    chamfer_size = dialog.get_chamfer_size()
+    chamfer_side = dialog.get_chamfer_side()
+
+    if not selected_gears:
+        return
+
+    # Process all selected gears
+    errors = []
+    processed_count = 0
+
+    for gear_obj in selected_gears:
+        success, error_msg = process_gear(doc, gear_obj, chamfer_size, chamfer_side)
+        if success:
+            processed_count += 1
+        else:
+            errors.append(error_msg)
+
+    doc.recompute()
+
+    # Report results
+    if errors:
+        msg = f"Processed {processed_count} gear(s).\n\nErrors encountered:\n" + "\n".join(
+            f"- {e}" for e in errors
+        )
+        QtWidgets.QMessageBox.warning(None, "Batch Processing Results", msg)
+    else:
+        QtWidgets.QMessageBox.information(
+            None,
+            "Success",
+            f"Successfully applied {chamfer_size:.2f} mm ({chamfer_side}) chamfer to {processed_count} gear(s).",
+        )
+
+
+if __name__ == "__main__":
+    main()

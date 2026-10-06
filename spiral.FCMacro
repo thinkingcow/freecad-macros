@@ -1,0 +1,227 @@
+import FreeCAD as App
+import FreeCADGui as Gui
+import Part
+import math
+
+# Cross-compatibility for FreeCAD UI
+try:
+    from PySide6 import QtWidgets, QtCore
+except ImportError:
+    try:
+        from PySide2 import QtWidgets, QtCore
+    except ImportError:
+        from PySide import QtWidgets, QtCore
+
+class ParametricSpiral:
+    def __init__(self, obj, dia, turns, fill, prox, thick):
+        # Safely add properties first
+        obj.addProperty("App::PropertyLength", "Diameter", "Spiral Parameters", "Outside diameter of the spiral")
+        obj.addProperty("App::PropertyFloat", "Turns", "Spiral Parameters", "Number of turns")
+        obj.addProperty("App::PropertyFloat", "FillPercent", "Spiral Parameters", "Percent of fill (1.0 to 99.9)")
+        obj.addProperty("App::PropertyFloat", "CenterProximity", "Spiral Parameters", "How close to the center it begins (100% = right to center, 50% = halfway)")
+        obj.addProperty("App::PropertyLength", "Thickness", "Spiral Parameters", "Extrusion thickness")
+        
+        # Then assign values
+        obj.Diameter = dia
+        obj.Turns = turns
+        obj.FillPercent = fill
+        obj.CenterProximity = prox
+        obj.Thickness = thick
+        
+        obj.Proxy = self
+
+    # Required for FreeCAD 1.0+ serialization to prevent hasher/topo warnings
+    def __getstate__(self):
+        return None
+
+    def __setstate__(self, state):
+        return None
+
+    def execute(self, fp):
+        diameter = fp.Diameter
+        turns = fp.Turns
+        fill_pct = fp.FillPercent
+        prox = fp.CenterProximity
+        thickness = fp.Thickness
+
+        # Safety clamps
+        if turns < 0.1: turns = 0.1
+        if fill_pct <= 0: fill_pct = 0.1
+        if fill_pct >= 100.0: fill_pct = 99.9
+        if diameter <= 0.1: diameter = 0.1
+        if prox < 0.1: prox = 0.1
+        if prox > 100.0: prox = 100.0
+
+        # Math calculations
+        R_out = diameter / 2.0
+        
+        # Calculate the starting radius based on the proximity percentage
+        # 100% -> (1.0 - 1.0) = 0 (Starts at center)
+        # 50%  -> (1.0 - 0.5) = 0.5 (Starts halfway)
+        R_start = R_out * (1.0 - prox / 100.0)
+        
+        # The total radial distance the spiral is allowed to grow
+        Delta_R = R_out - R_start
+
+        N = turns
+        f = fill_pct / 100.0
+
+        # W = Wire width, P = Pitch (distance between consecutive turns)
+        P = Delta_R / (N + f)
+        W = f * P
+        b = P / (2 * math.pi)
+
+        points_in = []
+        points_out = []
+
+        steps_per_turn = 72
+        total_steps = int(math.ceil(N * steps_per_turn))
+
+        for i in range(total_steps + 1):
+            if i == total_steps:
+                theta = 2 * math.pi * N 
+            else:
+                theta = (i / float(total_steps)) * (2 * math.pi * N)
+
+            r_in = R_start + b * theta
+            r_out = R_start + W + b * theta
+
+            points_in.append(App.Vector(r_in * math.cos(theta), r_in * math.sin(theta), 0))
+            points_out.insert(0, App.Vector(r_out * math.cos(theta), r_out * math.sin(theta), 0))
+
+        try:
+            curve_in = Part.BSplineCurve()
+            curve_in.interpolate(points_in)
+            edge_in = curve_in.toShape()
+
+            curve_out = Part.BSplineCurve()
+            curve_out.interpolate(points_out)
+            edge_out = curve_out.toShape()
+        except Exception as e:
+            App.Console.PrintError(f"Curve Interpolation failed: {str(e)}\n")
+            return
+
+        # Extract exact topological vertices to perfectly close the wire
+        p_in_start = edge_in.Vertexes[0].Point
+        p_in_end = edge_in.Vertexes[-1].Point
+        p_out_start = edge_out.Vertexes[0].Point
+        p_out_end = edge_out.Vertexes[-1].Point
+
+        cap1 = Part.makeLine(p_in_end, p_out_start)
+        cap2 = Part.makeLine(p_out_end, p_in_start)
+
+        wire = Part.Wire([edge_in, cap1, edge_out, cap2])
+
+        if not wire.isClosed():
+            App.Console.PrintError("Error: Generated wire is not closed.\n")
+            return
+
+        face = Part.Face(wire)
+        
+        if thickness > 0:
+            solid = face.extrude(App.Vector(0, 0, thickness))
+            solid = solid.removeSplitter()
+            fp.Shape = solid
+        else:
+            fp.Shape = face
+
+
+# Compliant ViewProvider for FreeCAD 1.1
+class ViewProviderSpiral:
+    def __init__(self, vobj):
+        vobj.Proxy = self
+
+    def attach(self, vobj):
+        self.ViewObject = vobj
+        self.Object = vobj.Object
+
+    def updateData(self, fp, prop):
+        pass
+
+    def getIcon(self):
+        return ""
+
+    def __getstate__(self):
+        return None
+
+    def __setstate__(self, state):
+        return None
+
+
+class SpiralGeneratorDialog(QtWidgets.QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Create Parametric Spiral")
+        self.setModal(True)
+        self.layout = QtWidgets.QFormLayout(self)
+
+        self.dia_input = QtWidgets.QDoubleSpinBox()
+        self.dia_input.setRange(1.0, 10000.0)
+        self.dia_input.setDecimals(2)
+        self.dia_input.setValue(100.0)
+        self.dia_input.setSuffix(" mm")
+        self.layout.addRow("Outside Diameter:", self.dia_input)
+
+        self.turns_input = QtWidgets.QDoubleSpinBox()
+        self.turns_input.setRange(0.25, 1000.0)
+        self.turns_input.setDecimals(2)
+        self.turns_input.setValue(5.0)
+        self.layout.addRow("Number of Turns:", self.turns_input)
+
+        self.fill_input = QtWidgets.QDoubleSpinBox()
+        self.fill_input.setRange(1.0, 99.9) 
+        self.fill_input.setDecimals(1)
+        self.fill_input.setValue(50.0)
+        self.fill_input.setSuffix(" %")
+        self.layout.addRow("Percent of Fill (Width):", self.fill_input)
+        
+        self.prox_input = QtWidgets.QDoubleSpinBox()
+        self.prox_input.setRange(0.1, 100.0) 
+        self.prox_input.setDecimals(1)
+        self.prox_input.setValue(100.0)
+        self.prox_input.setSuffix(" %")
+        self.prox_input.setToolTip("100% starts at the center. 50% creates a hollow inner area half the size of the outer diameter.")
+        self.layout.addRow("Center Proximity:", self.prox_input)
+
+        self.thick_input = QtWidgets.QDoubleSpinBox()
+        self.thick_input.setRange(0.01, 10000.0)
+        self.thick_input.setDecimals(2)
+        self.thick_input.setValue(10.0)
+        self.thick_input.setSuffix(" mm")
+        self.layout.addRow("Extruded Thickness:", self.thick_input)
+
+        self.button_box = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
+        self.button_box.accepted.connect(self.accept)
+        self.button_box.rejected.connect(self.reject)
+        self.layout.addRow(self.button_box)
+
+def create_parametric_spiral(dia, turns, fill, prox, thick):
+    doc = App.activeDocument()
+    if doc is None:
+        doc = App.newDocument()
+
+    obj = doc.addObject("Part::FeaturePython", "ExtrudedSpiral")
+    ParametricSpiral(obj, dia, turns, fill, prox, thick)
+    
+    if App.GuiUp:
+        ViewProviderSpiral(obj.ViewObject)
+
+    doc.recompute()
+    Gui.SendMsgToActiveView("ViewFit")
+
+def run_macro():
+    main_window = Gui.getMainWindow()
+    dialog = SpiralGeneratorDialog(main_window)
+    
+    exec_func = getattr(dialog, "exec", dialog.exec_)
+    
+    if exec_func() == QtWidgets.QDialog.Accepted:
+        dia = dialog.dia_input.value()
+        turns = dialog.turns_input.value()
+        fill = dialog.fill_input.value()
+        prox = dialog.prox_input.value()
+        thick = dialog.thick_input.value()
+        create_parametric_spiral(dia, turns, fill, prox, thick)
+
+if __name__ == "__main__":
+    run_macro()
