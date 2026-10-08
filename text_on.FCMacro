@@ -1,0 +1,397 @@
+import os
+import platform
+import math
+import re
+import FreeCAD as App
+import FreeCADGui as Gui
+import Part
+import Draft
+
+try:
+    from PySide6 import QtWidgets, QtCore, QtGui
+except ImportError:
+    from PySide2 import QtWidgets, QtCore, QtGui
+
+ROBOTO_DIR = "/usr/share/fonts/truetype/roboto"
+PARAM_PATH = "User parameter:BaseApp/Preferences/Macros/TextInPocket"
+
+
+def find_ttf_fonts(search_dir):
+    """Recursively scans search_dir for files ending with '.ttf'."""
+    ttf_files = []
+    if os.path.exists(search_dir):
+        for root, _, files in os.walk(search_dir):
+            for file in files:
+                if file.lower().endswith(".ttf"):
+                    ttf_files.append(os.path.join(root, file))
+    ttf_files.sort()
+    return ttf_files
+
+
+class TextPocketDialog(QtWidgets.QDialog):
+    """User input dialog that loads and restores default values from FreeCAD preferences."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Create Inlaid Text")
+        self.setMinimumWidth(520)
+
+        # Load persisted preferences or set fallback defaults
+        self.param = App.ParamGet(PARAM_PATH)
+        saved_text = self.param.GetString("Text", "Hello")
+        saved_font = self.param.GetString("FontPath", "")
+        saved_pocket_depth = self.param.GetFloat("PocketDepth", 2.0)
+        saved_surface_offset = self.param.GetFloat("SurfaceOffset", 0.50)
+        saved_margin = self.param.GetInt("FillRatio", 90)
+
+        layout = QtWidgets.QFormLayout(self)
+
+        # Text input
+        self.text_input = QtWidgets.QLineEdit(saved_text)
+        layout.addRow("Text:", self.text_input)
+
+        # Font Selection Dropdown + Browse
+        font_layout = QtWidgets.QHBoxLayout()
+        self.font_combo = QtWidgets.QComboBox()
+        self.font_combo.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed
+        )
+        
+        self.populate_fonts(saved_font)
+
+        self.browse_btn = QtWidgets.QPushButton("Browse...")
+        self.browse_btn.clicked.connect(self.browse_font)
+
+        font_layout.addWidget(self.font_combo)
+        font_layout.addWidget(self.browse_btn)
+        layout.addRow("Font (.ttf):", font_layout)
+
+        # Pocket Depth
+        self.pocket_depth_input = QtWidgets.QDoubleSpinBox()
+        self.pocket_depth_input.setRange(0.1, 1000.0)
+        self.pocket_depth_input.setValue(saved_pocket_depth)
+        self.pocket_depth_input.setDecimals(2)
+        self.pocket_depth_input.setSuffix(" mm")
+        self.pocket_depth_input.setToolTip("Depth of pocket cut into the selected object")
+        layout.addRow("Pocket Depth:", self.pocket_depth_input)
+
+        # Surface Offset (+ above face, - recessed below face)
+        self.surface_offset_input = QtWidgets.QDoubleSpinBox()
+        self.surface_offset_input.setRange(-500.0, 500.0)
+        self.surface_offset_input.setValue(saved_surface_offset)
+        self.surface_offset_input.setDecimals(2)
+        self.surface_offset_input.setSuffix(" mm")
+        self.surface_offset_input.setToolTip(
+            "> 0: Extends above face\n< 0: Recessed below face\n= 0: Flush with face"
+        )
+        layout.addRow("Surface Offset (+/-):", self.surface_offset_input)
+
+        # Fit Fill Ratio
+        self.margin_input = QtWidgets.QSpinBox()
+        self.margin_input.setRange(50, 100)
+        self.margin_input.setValue(saved_margin)
+        self.margin_input.setSuffix(" %")
+        self.margin_input.setToolTip("Percentage of face area filled by text")
+        layout.addRow("Fit Fill Ratio:", self.margin_input)
+
+        # Buttons
+        self.button_box = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
+        )
+        self.button_box.accepted.connect(self.accept)
+        self.button_box.rejected.connect(self.reject)
+        layout.addRow(self.button_box)
+
+    def populate_fonts(self, saved_font_path=""):
+        """Populates font dropdown and pre-selects the previously used font."""
+        fonts = find_ttf_fonts(ROBOTO_DIR)
+        self.font_combo.clear()
+
+        if fonts:
+            for font_path in fonts:
+                rel_path = os.path.relpath(font_path, ROBOTO_DIR)
+                self.font_combo.addItem(rel_path, userData=font_path)
+        else:
+            self.font_combo.addItem(f"No .ttf fonts found in {ROBOTO_DIR}", userData="")
+
+        # Pre-select previously saved font path
+        if saved_font_path:
+            idx = self.font_combo.findData(saved_font_path)
+            if idx >= 0:
+                self.font_combo.setCurrentIndex(idx)
+            elif os.path.exists(saved_font_path):
+                label = os.path.basename(saved_font_path)
+                self.font_combo.addItem(f"{label} (custom)", userData=saved_font_path)
+                self.font_combo.setCurrentIndex(self.font_combo.count() - 1)
+
+    def browse_font(self):
+        start_dir = ROBOTO_DIR if os.path.exists(ROBOTO_DIR) else ""
+        file_path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, "Select Font File", start_dir, "Font Files (*.ttf *.otf *.ttc)"
+        )
+        if file_path:
+            for i in range(self.font_combo.count()):
+                if self.font_combo.itemData(i) == file_path:
+                    self.font_combo.setCurrentIndex(i)
+                    return
+            label = os.path.basename(file_path)
+            self.font_combo.addItem(f"{label} (custom)", userData=file_path)
+            self.font_combo.setCurrentIndex(self.font_combo.count() - 1)
+
+    def get_selected_font_path(self):
+        return self.font_combo.currentData()
+
+    def save_preferences(self, text_str, font_path, pocket_depth, surface_offset, fill_ratio):
+        """Saves current input values to FreeCAD user preferences."""
+        self.param.SetString("Text", text_str)
+        self.param.SetString("FontPath", font_path)
+        self.param.SetFloat("PocketDepth", pocket_depth)
+        self.param.SetFloat("SurfaceOffset", surface_offset)
+        self.param.SetInt("FillRatio", fill_ratio)
+
+
+def get_target_object_and_face():
+    """Returns (base_obj, target_face, err_message)."""
+    selection = Gui.Selection.getSelectionEx()
+    if not selection:
+        return None, None, "No object or face selected in 3D View."
+
+    sel_obj = selection[0]
+    obj = sel_obj.Object
+
+    if sel_obj.HasSubObjects:
+        for sub in sel_obj.SubObjects:
+            if isinstance(sub, Part.Face):
+                return obj, sub, None
+
+    if hasattr(obj, "Shape") and obj.Shape.Faces:
+        view = Gui.ActiveDocument.ActiveView
+        cam_dir = view.getViewDirection()
+        to_cam = -cam_dir
+        to_cam.normalize()
+
+        best_face = None
+        best_dot = -2.0
+
+        for face in obj.Shape.Faces:
+            u_min, u_max, v_min, v_max = face.ParameterRange
+            u_mid = (u_min + u_max) / 2.0
+            v_mid = (v_min + v_max) / 2.0
+            normal = face.normalAt(u_mid, v_mid)
+            normal.normalize()
+
+            dot = normal.dot(to_cam)
+            if dot > best_dot:
+                best_dot = dot
+                best_face = face
+
+        if best_face:
+            return obj, best_face, None
+
+    return None, None, "Selected object has no valid geometry faces."
+
+
+def calculate_face_bounds_and_frame(face):
+    """Computes face local frame (Origin, X, Y, Normal) and discretized 2D bounds."""
+    u_min, u_max, v_min, v_max = face.ParameterRange
+    u_mid = (u_min + u_max) / 2.0
+    v_mid = (v_min + v_max) / 2.0
+
+    normal = face.normalAt(u_mid, v_mid)
+    normal.normalize()
+
+    tangent_u = face.tangentAt(u_mid, v_mid)[0]
+    if tangent_u.Length > 1e-5:
+        x_axis = tangent_u
+        x_axis.normalize()
+    else:
+        if abs(normal.z) < 0.9:
+            x_axis = normal.cross(App.Vector(0, 0, 1))
+        else:
+            x_axis = normal.cross(App.Vector(0, 1, 0))
+        x_axis.normalize()
+
+    y_axis = normal.cross(x_axis)
+    y_axis.normalize()
+
+    face_center = face.CenterOfMass
+
+    points = []
+    for edge in face.Edges:
+        try:
+            pts = edge.discretize(Number=20)
+            points.extend(pts)
+        except Exception:
+            pass
+
+    if not points:
+        points = [v.Point for v in face.Vertexes]
+
+    local_us = []
+    local_vs = []
+    for pt in points:
+        rel = pt - face_center
+        local_us.append(rel.dot(x_axis))
+        local_vs.append(rel.dot(y_axis))
+
+    min_u, max_u = min(local_us), max(local_us)
+    min_v, max_v = min(local_vs), max(local_vs)
+
+    face_w = max_u - min_u
+    face_h = max_v - min_v
+
+    center_u = (min_u + max_u) / 2.0
+    center_v = (min_v + max_v) / 2.0
+
+    return face_center, x_axis, y_axis, normal, face_w, face_h, center_u, center_v
+
+
+def main():
+    doc = App.ActiveDocument
+    if not doc:
+        QtWidgets.QMessageBox.critical(None, "Error", "No active document found.")
+        return
+
+    base_obj, face, err = get_target_object_and_face()
+    if err:
+        QtWidgets.QMessageBox.warning(None, "Selection Error", err)
+        return
+
+    dialog = TextPocketDialog(Gui.getMainWindow())
+    if dialog.exec() != QtWidgets.QDialog.Accepted:
+        return
+
+    text_str = dialog.text_input.text().strip()
+    font_path = dialog.get_selected_font_path()
+    pocket_depth = dialog.pocket_depth_input.value()
+    surface_offset = dialog.surface_offset_input.value()
+    fill_ratio_val = dialog.margin_input.value()
+    fill_ratio = fill_ratio_val / 100.0
+
+    if not text_str:
+        QtWidgets.QMessageBox.warning(None, "Input Error", "Text string cannot be empty.")
+        return
+
+    if not font_path or not os.path.exists(font_path):
+        QtWidgets.QMessageBox.warning(
+            None, "Font Error", f"Invalid font path selected:\n{font_path}"
+        )
+        return
+
+    # Persist values for future runs
+    dialog.save_preferences(
+        text_str=text_str,
+        font_path=font_path,
+        pocket_depth=pocket_depth,
+        surface_offset=surface_offset,
+        fill_ratio=fill_ratio_val,
+    )
+
+    clean_text = re.sub(r"\s+", "_", text_str)
+
+    total_text_height = pocket_depth + surface_offset
+    if total_text_height <= 0.01:
+        QtWidgets.QMessageBox.critical(
+            None,
+            "Geometry Error",
+            f"Total text height must be positive.\n"
+            f"Pocket Depth ({pocket_depth} mm) + Surface Offset ({surface_offset} mm) = {total_text_height:.2f} mm",
+        )
+        return
+
+    center, x_axis, y_axis, normal, face_w, face_h, center_u, center_v = (
+        calculate_face_bounds_and_frame(face)
+    )
+
+    if face_w <= 0 or face_h <= 0:
+        QtWidgets.QMessageBox.critical(None, "Error", "Could not determine valid face dimensions.")
+        return
+
+    doc.openTransaction("Create Pocket and Inlaid Text")
+
+    try:
+        shapestring_obj = Draft.make_shapestring(String=text_str, FontFile=font_path, Size=100.0)
+    except AttributeError:
+        shapestring_obj = Draft.makeShapeString(String=text_str, FontFile=font_path, Size=100.0)
+
+    doc.recompute()
+
+    raw_bb = shapestring_obj.Shape.BoundBox
+    text_w = raw_bb.XLength
+    text_h = raw_bb.YLength
+
+    if text_w <= 0 or text_h <= 0:
+        doc.removeObject(shapestring_obj.Name)
+        doc.abortTransaction()
+        QtWidgets.QMessageBox.critical(None, "Error", "Failed to measure text geometry bounds.")
+        return
+
+    scale_w = (face_w * fill_ratio) / text_w
+    scale_h = (face_h * fill_ratio) / text_h
+    scale = min(scale_w, scale_h)
+
+    shapestring_obj.Size = 100.0 * scale
+    doc.recompute()
+
+    scaled_bb = shapestring_obj.Shape.BoundBox
+    text_2d_shape = shapestring_obj.Shape
+
+    text_center_x = (scaled_bb.XMin + scaled_bb.XMax) / 2.0
+    text_center_y = (scaled_bb.YMin + scaled_bb.YMax) / 2.0
+
+    du = center_u - text_center_x
+    dv = center_v - text_center_y
+
+    surface_center = center + (x_axis * du) + (y_axis * dv)
+
+    doc.removeObject(shapestring_obj.Name)
+
+    # 1. Transform 2D text shape onto Top Face Plane
+    m_surface = App.Matrix()
+    m_surface.A11, m_surface.A12, m_surface.A13, m_surface.A14 = x_axis.x, y_axis.x, normal.x, surface_center.x
+    m_surface.A21, m_surface.A22, m_surface.A23, m_surface.A24 = x_axis.y, y_axis.y, normal.y, surface_center.y
+    m_surface.A31, m_surface.A32, m_surface.A33, m_surface.A34 = x_axis.z, y_axis.z, normal.z, surface_center.z
+    m_surface.A41, m_surface.A42, m_surface.A43, m_surface.A44 = 0.0,      0.0,      0.0,      1.0
+
+    surface_2d_shape = text_2d_shape.copy()
+    surface_2d_shape.transformShape(m_surface)
+
+    # 2. Create Pocket Cutter
+    pocket_cutter = surface_2d_shape.extrude(-normal * pocket_depth)
+    pocketed_shape = base_obj.Shape.cut(pocket_cutter)
+
+    # 3. Create Inlaid Text Shape from bottom of pocket
+    pocket_bottom_center = surface_center - (normal * pocket_depth)
+
+    m_bottom = App.Matrix()
+    m_bottom.A11, m_bottom.A12, m_bottom.A13, m_bottom.A14 = x_axis.x, y_axis.x, normal.x, pocket_bottom_center.x
+    m_bottom.A21, m_bottom.A22, m_bottom.A23, m_bottom.A24 = x_axis.y, y_axis.y, normal.y, pocket_bottom_center.y
+    m_bottom.A31, m_bottom.A32, m_bottom.A33, m_bottom.A34 = x_axis.z, y_axis.z, normal.z, pocket_bottom_center.z
+    m_bottom.A41, m_bottom.A42, m_bottom.A43, m_bottom.A44 = 0.0,      0.0,      0.0,      1.0
+
+    bottom_2d_shape = text_2d_shape.copy()
+    bottom_2d_shape.transformShape(m_bottom)
+
+    inlaid_text_shape = bottom_2d_shape.extrude(normal * total_text_height)
+
+    # Update base object shape with pocket cut & set Label
+    pocket_obj = doc.addObject("Part::Feature", f"Pocket_{clean_text}")
+    pocket_obj.Label = f"Pocket_{clean_text}"
+    pocket_obj.Shape = pocketed_shape
+    pocket_obj.ViewObject.ShapeColor = base_obj.ViewObject.ShapeColor
+
+    # Create Inlaid Text Feature & set Label
+    text_obj = doc.addObject("Part::Feature", f"Text_{clean_text}")
+    text_obj.Label = f"Text_{clean_text}"
+    text_obj.Shape = inlaid_text_shape
+    text_obj.ViewObject.ShapeColor = (0.9, 0.2, 0.2)
+
+    # Hide original base object
+    base_obj.ViewObject.Visibility = False
+
+    doc.commitTransaction()
+    doc.recompute()
+
+
+if __name__ == "__main__":
+    main()

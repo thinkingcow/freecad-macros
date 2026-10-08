@@ -23,3 +23,5 @@ modifications I've made are changes to the UI messages.
                    splines adding friction for a tighter fit.  The splines work on either the male or female (with subtraction) sides
                    the connection.
 - **ellipse**    Creates an elliptical involute gear.
+- **spiral**     Creates an archimedes spiral
+- **chamfer_gears** adds chamfers to one or both sides of an fcgear generated planetary gear system
