@@ -1,176 +1,299 @@
-# ==============================================================================
-# FreeCAD Elliptical Gear Generator Macro
-# Generates a true elliptical gear with involute teeth and a center bore.
-# ==============================================================================
-
 import FreeCAD
+import FreeCADGui
 import Part
 import math
+import bisect
+import sys
 
-# ================== GEAR PARAMETERS ==================
-A_SEMI_AXIS = 45.0       # Semi-major axis (a) in mm
-B_SEMI_AXIS = 25.0       # Semi-minor axis (b) in mm
-NUM_TEETH = 35           # Number of teeth (Z)
-PRESSURE_ANGLE = 20.0    # Pressure angle in degrees
-THICKNESS = 5.0       # Thickness of the gear in mm
-BORE_RADIUS = 2.4       # Center bore hole radius in mm
-# =====================================================
-
-def get_arc_lengths(a, b, num_steps=3000):
-    """Calculates arc length of the ellipse numerically for even tooth spacing."""
-    t_vals = []
-    s_vals = []
-    s = 0.0
-    dt = 2.0 * math.pi / num_steps
-    
-    for i in range(num_steps + 1):
-        t = i * dt
-        t_vals.append(t)
-        s_vals.append(s)
-        if i < num_steps:
-            # Midpoint integration for higher accuracy
-            tm = t + dt / 2.0
-            ds = math.sqrt((-a * math.sin(tm))**2 + (b * math.cos(tm))**2) * dt
-            s += ds
-    return t_vals, s_vals, s
-
-def interp(s_target, t_vals, s_vals):
-    """Interpolates parameter t for a given arc length s."""
-    for i in range(len(s_vals) - 1):
-        if s_vals[i] <= s_target <= s_vals[i+1]:
-            ratio = (s_target - s_vals[i]) / (s_vals[i+1] - s_vals[i])
-            return t_vals[i] + ratio * (t_vals[i+1] - t_vals[i])
-    return t_vals[-1]
-
-def get_tooth_points(Rc, m, alpha, p):
-    """Generates the 2D local coordinates of an involute tooth based on local curvature."""
-    alpha_rad = math.radians(alpha)
-    Rb = Rc * math.cos(alpha_rad)
-    Rout = Rc + m
-    Rroot = Rc - 1.25 * m  # Standard root depth
-    
-    inv_alpha = math.tan(alpha_rad) - alpha_rad
-    theta_base = (math.pi * m) / (4.0 * Rc) + inv_alpha
-    theta_pitch_half = p / (2.0 * Rc)
-    
-    pts_local = []
-    
-    def add_polar(r, theta):
-        # Center of curvature is at (0, -Rc) in local frame
-        x = r * math.sin(theta)
-        y = r * math.cos(theta) - Rc
-        pts_local.append(FreeCAD.Vector(x, y, 0))
+class EllipticalGear:
+    """Parametric Elliptical Gear Object for FreeCAD 1.1"""
+    def __init__(self, obj):
+        obj.Proxy = self
         
-    def get_inv_theta(r):
-        val = max(0.0, (r / Rb)**2 - 1.0)
-        phi = math.sqrt(val)
-        return theta_base - (math.tan(phi) - phi)
+        # ----------------------------------------------------
+        # 1. USER-MODIFIABLE PROPERTIES
+        # ----------------------------------------------------
+        obj.addProperty("App::PropertyInteger", "Teeth", "Gear", "Number of teeth (Z)").Teeth = 30
+        obj.addProperty("App::PropertyFloat", "AspectRatio", "Gear", "Ratio of semi-major to semi-minor axis (a/b)").AspectRatio = 1.25
+        obj.addProperty("App::PropertyFloat", "Module", "Gear", "Gear module in mm (m)").Module = 2.0
+        obj.addProperty("App::PropertyFloat", "Thickness", "Gear", "Gear face thickness in mm").Thickness = 10.0
+        obj.addProperty("App::PropertyAngle", "PressureAngle", "Gear", "Pressure angle").PressureAngle = 20.0
+        obj.addProperty("App::PropertyFloat", "BoreRadius", "Bore", "Center bore hole radius in mm").BoreRadius = 10.0
 
-    # 1. Left Root Point
-    add_polar(Rroot, -theta_pitch_half)
+        # ----------------------------------------------------
+        # 2. READ-ONLY CALCULATED PROPERTIES
+        # ----------------------------------------------------
+        obj.addProperty("App::PropertyLength", "MajorOutsideDiameter", "Gear Dimensions", "Outside major axis diameter")
+        obj.addProperty("App::PropertyLength", "MinorOutsideDiameter", "Gear Dimensions", "Outside minor axis diameter")
+        obj.addProperty("App::PropertyLength", "MajorRootDiameter", "Gear Dimensions", "Root major axis diameter")
+        obj.addProperty("App::PropertyLength", "MinorRootDiameter", "Gear Dimensions", "Root minor axis diameter")
 
-    # 2. Left Flank Base Connection
-    if Rroot < Rb:
-        add_polar(Rroot, -theta_base)
+        obj.setEditorMode("MajorOutsideDiameter", 1)
+        obj.setEditorMode("MinorOutsideDiameter", 1)
+        obj.setEditorMode("MajorRootDiameter", 1)
+        obj.setEditorMode("MinorRootDiameter", 1)
 
-    # 3. Left Flank (Involute curve)
-    r_start = max(Rb, Rroot)
-    num_inv = 12
-    for i in range(num_inv + 1):
-        r = r_start + (Rout - r_start) * (i / num_inv)
-        add_polar(r, -get_inv_theta(r))
-
-    # 4. Right Flank (Involute curve)
-    for i in range(num_inv, -1, -1):
-        r = r_start + (Rout - r_start) * (i / num_inv)
-        add_polar(r, get_inv_theta(r))
-
-    # 5. Right Flank Base Connection
-    if Rroot < Rb:
-        add_polar(Rroot, theta_base)
-
-    # 6. Right Root Point
-    add_polar(Rroot, theta_pitch_half)
-    
-    return pts_local
-
-def main():
-    # Enforce a >= b
-    a = max(A_SEMI_AXIS, B_SEMI_AXIS)
-    b = min(A_SEMI_AXIS, B_SEMI_AXIS)
-    
-    # 1. Calculate Perimeter and Module
-    t_vals, s_vals, perimeter = get_arc_lengths(a, b)
-    m = perimeter / (math.pi * NUM_TEETH)
-    pitch = perimeter / NUM_TEETH
-    
-    FreeCAD.Console.PrintMessage(f"Generating Elliptical Gear:\n")
-    FreeCAD.Console.PrintMessage(f"- Perimeter: {perimeter:.2f} mm\n")
-    FreeCAD.Console.PrintMessage(f"- Calculated Module: {m:.3f}\n")
-    
-    global_points = []
-    
-    # 2. Generate point array along the ellipse
-    for k in range(NUM_TEETH):
-        S_k = k * pitch
-        t_k = interp(S_k, t_vals, s_vals)
+    def execute(self, obj):
+        """Recompute the OCC-valid 3D solid whenever any property is changed"""
+        Z = max(3, int(obj.Teeth))
+        ar = max(0.1, float(obj.AspectRatio))
+        m = max(0.001, float(obj.Module))
+        thickness = max(0.001, float(obj.Thickness))
+        bore_radius = max(0.0, float(obj.BoreRadius))
+        pressure_angle = float(obj.PressureAngle)
         
-        # Position on ellipse
-        Px = a * math.cos(t_k)
-        Py = b * math.sin(t_k)
-        P = FreeCAD.Vector(Px, Py, 0)
+        # Target total pitch perimeter: L = pi * m * Z
+        L_target = math.pi * m * Z
         
-        # Derivatives for tangent and normal
-        dx = -a * math.sin(t_k)
-        dy = b * math.cos(t_k)
-        len_d = math.sqrt(dx**2 + dy**2)
+        # Compute unit ellipse perimeter (a = 1.0, b = 1.0 / AR)
+        num_samples = 5000
+        unit_perimeter = 0.0
+        inv_ar = 1.0 / ar
         
-        # Unit Tangent and Unit Normal vectors
-        T = FreeCAD.Vector(dx / len_d, dy / len_d, 0)
-        N = FreeCAD.Vector(dy / len_d, -dx / len_d, 0) # Outward pointing
-        
-        # Local radius of curvature
-        Rc = (a**2 * math.sin(t_k)**2 + b**2 * math.cos(t_k)**2)**1.5 / (a * b)
-        
-        # Get localized tooth profile based on curvature
-        pts_local = get_tooth_points(Rc, m, PRESSURE_ANGLE, pitch)
-        
-        # Transform local tooth points to global elliptical curve
-        for pt in pts_local:
-            P_glob = P + (pt.x * T) + (pt.y * N)
-            global_points.append(P_glob)
+        for i in range(num_samples):
+            t_prev = i * 2.0 * math.pi / num_samples
+            t_curr = (i + 1) * 2.0 * math.pi / num_samples
+            t_mid = (t_prev + t_curr) / 2.0
+            dt = t_curr - t_prev
+            ds = math.sqrt(math.sin(t_mid)**2 + (inv_ar * math.cos(t_mid))**2) * dt
+            unit_perimeter += ds
             
-    # Close the geometry perimeter loop
-    global_points.append(global_points[0])
-    
-    # 3. Create the FreeCAD Geometry
+        a = L_target / unit_perimeter
+        b = a / ar
+
+        # Update Read-Only Calculated Diameters
+        addendum = m
+        dedendum = 1.25 * m
+
+        obj.MajorOutsideDiameter = 2.0 * (a + addendum)
+        obj.MinorOutsideDiameter = 2.0 * (b + addendum)
+        obj.MajorRootDiameter = 2.0 * (a - dedendum)
+        obj.MinorRootDiameter = 2.0 * (b - dedendum)
+        
+        # Build ellipse arc length mapping table
+        t_vals = [0.0]
+        s_vals = [0.0]
+        current_s = 0.0
+        
+        for i in range(1, num_samples + 1):
+            t_prev = (i - 1) * 2.0 * math.pi / num_samples
+            t_curr = i * 2.0 * math.pi / num_samples
+            t_mid = (t_prev + t_curr) / 2.0
+            dt = t_curr - t_prev
+            
+            ds = math.sqrt(a**2 * math.sin(t_mid)**2 + b**2 * math.cos(t_mid)**2) * dt
+            current_s += ds
+            t_vals.append(t_curr)
+            s_vals.append(current_s)
+
+        L = s_vals[-1]
+        p = L / Z
+        alpha = math.radians(pressure_angle)
+
+        def get_t_for_s(target_s):
+            target_s = target_s % L
+            if target_s < 0:
+                target_s += L
+            idx = bisect.bisect_left(s_vals, target_s)
+            if idx == 0:
+                return t_vals[0]
+            if idx >= len(s_vals):
+                return t_vals[-1]
+            s0, s1 = s_vals[idx-1], s_vals[idx]
+            t0, t1 = t_vals[idx-1], t_vals[idx]
+            if s1 == s0:
+                return t0
+            return t0 + (target_s - s0) / (s1 - s0) * (t1 - t0)
+
+        def get_root_point_global(s_val):
+            """Returns precise global vector on the root curve at arc length s_val"""
+            t_c = get_t_for_s(s_val)
+            Px = a * math.cos(t_c)
+            Py = b * math.sin(t_c)
+            dx = -a * math.sin(t_c)
+            dy = b * math.cos(t_c)
+            length = math.sqrt(dx**2 + dy**2)
+            Tx = dx / length
+            Ty = dy / length
+            Nx = -Ty
+            Ny = Tx
+            Rx = Px + dedendum * Nx
+            Ry = Py + dedendum * Ny
+            return FreeCAD.Vector(Rx, Ry, 0)
+
+        all_global_points = []
+
+        for i in range(Z):
+            s_c = i * p
+            t_c = get_t_for_s(s_c)
+            
+            Px = a * math.cos(t_c)
+            Py = b * math.sin(t_c)
+            
+            dx = -a * math.sin(t_c)
+            dy = b * math.cos(t_c)
+            length = math.sqrt(dx**2 + dy**2)
+            Tx = dx / length
+            Ty = dy / length
+            
+            rho = (a**2 * math.sin(t_c)**2 + b**2 * math.cos(t_c)**2)**1.5 / (a * b)
+            R = rho
+            
+            pitch_angle = math.pi * m / R
+            W = pitch_angle / 2.0
+            r_a = R + m
+            r_d = R - 1.25 * m
+            R_b = R * math.cos(alpha)
+            
+            inv_alpha = math.tan(alpha) - alpha
+            theta_0_right = math.pi/2 - W/2 - inv_alpha
+            theta_0_left  = math.pi/2 + W/2 + inv_alpha
+            
+            # Continuous boundary midpoints shared with adjacent teeth
+            pt_root_start = get_root_point_global(s_c - p/2.0)
+            pt_root_end   = get_root_point_global(s_c + p/2.0)
+
+            if r_d >= R_b:
+                phi_min = math.sqrt((r_d/R_b)**2 - 1.0)
+                theta_root_left = theta_0_left - (phi_min - math.atan(phi_min))
+                theta_root_right = theta_0_right + (phi_min - math.atan(phi_min))
+            else:
+                phi_min = 0.0
+                theta_root_left = theta_0_left
+                theta_root_right = theta_0_right
+                
+            phi_max = math.sqrt((r_a/R_b)**2 - 1.0)
+            
+            def local_to_global(r, th):
+                lx = r * math.cos(th)
+                ly = r * math.sin(th) - R
+                gx = Px + lx * Tx + ly * Ty
+                gy = Py + lx * Ty - ly * Tx
+                return FreeCAD.Vector(gx, gy, 0)
+
+            tooth_pts = []
+
+            # 1. Start at exact root boundary midpoint
+            tooth_pts.append(pt_root_start)
+
+            # 2. Transition arc to left involute base
+            pt_inv_left_base = local_to_global(r_d, theta_root_left)
+            num_arc = 4
+            for j in range(1, num_arc):
+                frac = j / float(num_arc)
+                interp_pt = pt_root_start.add(pt_inv_left_base.sub(pt_root_start).multiply(frac))
+                tooth_pts.append(interp_pt)
+
+            # 3. Left involute curve
+            num_inv = 12
+            for j in range(1, num_inv):
+                phi = phi_min + (phi_max - phi_min) * j / (num_inv - 1)
+                r = R_b * math.sqrt(1 + phi**2)
+                th = theta_0_left - (phi - math.atan(phi))
+                tooth_pts.append(local_to_global(r, th))
+
+            # 4. Top addendum arc
+            theta_left_top = theta_0_left - (phi_max - math.atan(phi_max))
+            theta_right_top = theta_0_right + (phi_max - math.atan(phi_max))
+            for j in range(1, num_arc):
+                th = theta_left_top + (theta_right_top - theta_left_top) * j / (num_arc - 1)
+                tooth_pts.append(local_to_global(r_a, th))
+
+            # 5. Right involute curve
+            for j in range(1, num_inv):
+                phi = phi_max - (phi_max - phi_min) * j / (num_inv - 1)
+                r = R_b * math.sqrt(1 + phi**2)
+                th = theta_0_right + (phi - math.atan(phi))
+                tooth_pts.append(local_to_global(r, th))
+
+            # 6. Transition arc ending at right root boundary midpoint
+            pt_inv_right_base = local_to_global(r_d, theta_root_right)
+            for j in range(1, num_arc):
+                frac = j / float(num_arc)
+                interp_pt = pt_inv_right_base.add(pt_root_end.sub(pt_inv_right_base).multiply(frac))
+                tooth_pts.append(interp_pt)
+
+            tooth_pts.append(pt_root_end)
+            all_global_points.extend(tooth_pts)
+
+        # Remove duplicate points
+        cleaned_points = [all_global_points[0]]
+        for p_pt in all_global_points[1:]:
+            if (p_pt - cleaned_points[-1]).Length > 1e-4:
+                cleaned_points.append(p_pt)
+
+        if (cleaned_points[-1] - cleaned_points[0]).Length > 1e-4:
+            cleaned_points.append(cleaned_points[0])
+
+        # Construct and repair wire/face topology
+        polygon = Part.makePolygon(cleaned_points)
+        gear_wire = Part.Wire(polygon)
+        gear_wire.fix(1e-3, 1e-3, 1e-3)
+        
+        gear_face = Part.Face(gear_wire)
+        gear_face.validate()
+
+        # Center Bore Hole (at 0,0,0)
+        if bore_radius > 0.001:
+            bore_edge = Part.makeCircle(bore_radius, FreeCAD.Vector(0, 0, 0), FreeCAD.Vector(0, 0, 1))
+            bore_wire = Part.Wire([bore_edge])
+            bore_face = Part.Face(bore_wire)
+            final_face = gear_face.cut(bore_face)
+        else:
+            final_face = gear_face
+
+        # Extrude and clean up coplanar splitters for robust OCC Boolean operations
+        gear_solid = final_face.extrude(FreeCAD.Vector(0, 0, thickness))
+        try:
+            gear_solid = gear_solid.removeSplitter()
+        except Exception:
+            pass
+            
+        obj.Shape = gear_solid
+
+
+class ViewProviderEllipticalGear:
+    """View provider class for FreeCAD GUI integration"""
+    def __init__(self, vobj):
+        vobj.Proxy = self
+
+    def attach(self, vobj):
+        self.ViewObject = vobj
+
+    def getDefaultDisplayMode(self):
+        return "Shaded"
+
+    def getIcon(self):
+        return ""
+
+    def __getstate__(self):
+        return None
+
+    def __setstate__(self, state):
+        return None
+
+
+# ----------------------------------------------------
+# EXPLICITLY REGISTER CLASSES IN MAIN MODULE SCOPE
+# ----------------------------------------------------
+sys.modules['__main__'].EllipticalGear = EllipticalGear
+sys.modules['__main__'].ViewProviderEllipticalGear = ViewProviderEllipticalGear
+
+
+def makeEllipticalGear():
     doc = FreeCAD.activeDocument()
     if doc is None:
-        doc = FreeCAD.newDocument("Elliptical_Gear")
+        doc = FreeCAD.newDocument("EllipticalGearDoc")
         
-    doc.openTransaction("Create Elliptical Gear")
+    obj = doc.addObject("Part::FeaturePython", "EllipticalGear")
+    EllipticalGear(obj)
     
-    try:
-        # Create base gear contour and solid
-        wire = Part.makePolygon(global_points)
-        face = Part.Face(wire)
-        gear_solid = face.extrude(FreeCAD.Vector(0, 0, THICKNESS))
+    if FreeCAD.GuiUp and obj.ViewObject is not None:
+        ViewProviderEllipticalGear(obj.ViewObject)
         
-        # Create and subtract center bore
-        bore_cyl = Part.makeCylinder(BORE_RADIUS, THICKNESS)
-        bore_cyl.Placement = FreeCAD.Placement(FreeCAD.Vector(0,0,0), FreeCAD.Rotation(0,0,0))
-        final_solid = gear_solid.cut(bore_cyl)
-        
-        # Add to document
-        obj = doc.addObject("Part::Feature", "EllipticalGear")
-        obj.Shape = final_solid
-        
-    except Exception as e:
-        FreeCAD.Console.PrintError(f"Failed to build gear geometry: {e}\n")
-    finally:
-        doc.commitTransaction()
-        doc.recompute()
-        FreeCAD.Gui.SendMsgToActiveView("ViewFit")
+    doc.recompute()
+    if FreeCAD.GuiUp:
+        FreeCADGui.SendMsgToActiveView("ViewFit")
 
 if __name__ == "__main__":
-    main()
+    makeEllipticalGear()
