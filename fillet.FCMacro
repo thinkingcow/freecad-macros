@@ -1,0 +1,125 @@
+import FreeCAD as App
+import FreeCADGui as Gui
+from PySide import QtGui
+
+
+def get_parent_body(obj):
+    """Safely retrieves the PartDesign Body containing the given object, if any."""
+    if hasattr(obj, "isDerivedFrom") and obj.isDerivedFrom("PartDesign::Body"):
+        return obj
+
+    # Check container lists for parent PartDesign Body
+    for parent in getattr(obj, "InList", []):
+        if hasattr(parent, "isDerivedFrom") and parent.isDerivedFrom("PartDesign::Body"):
+            return parent
+    return None
+
+
+def main():
+    # 1. Get active document and selection
+    doc = App.ActiveDocument
+    if not doc:
+        QtGui.QMessageBox.critical(
+            None, "Error", "No active document open in FreeCAD."
+        )
+        return
+
+    selection = Gui.Selection.getSelectionEx()
+    if not selection:
+        QtGui.QMessageBox.warning(
+            None, "No Selection", "Please select edges on a shape."
+        )
+        return
+
+    # 2. Extract target object and collect selected edge names
+    target_obj = selection[0].Object
+    edge_names = []
+
+    for sel_obj in selection:
+        if sel_obj.Object != target_obj:
+            QtGui.QMessageBox.warning(
+                None,
+                "Selection Error",
+                "Please select edges belonging to the same object.",
+            )
+            return
+
+        for sub_name in sel_obj.SubElementNames:
+            if "Edge" in sub_name and sub_name not in edge_names:
+                edge_names.append(sub_name)
+
+    if not edge_names:
+        QtGui.QMessageBox.warning(
+            None, "No Edges Selected", "No edges were found in your selection."
+        )
+        return
+
+    # 3. Prompt user for formula/expression
+    formula, ok = QtGui.QInputDialog.getText(
+        None,
+        "Fillet Formula",
+        "Enter a formula or expression for the fillet radius:\n(e.g., '5 mm', 'Spreadsheet.FilletRadius', 'Box.Length / 10')",
+        QtGui.QLineEdit.Normal,
+        "5 mm",
+    )
+
+    if not ok or not formula.strip():
+        return
+
+    expr_str = formula.strip()
+    doc.openTransaction("Create Fillet with Formula")
+
+    try:
+        # 4. Check if inside a PartDesign Body
+        body = get_parent_body(target_obj)
+
+        if body:
+            # --- PartDesign Workbench Fillet ---
+            fillet = doc.addObject("PartDesign::Fillet", "Fillet")
+            fillet.Base = (target_obj, edge_names)
+            body.addObject(fillet)
+            
+            # Direct binding to 'Radius' property
+            fillet.setExpression("Radius", expr_str)
+
+        else:
+            # --- Part Workbench Fillet ---
+            fillet = doc.addObject("Part::Fillet", "Fillet")
+            fillet.Base = target_obj
+            
+            # Map selected edge names (e.g. 'Edge1') to 1-based edge indices
+            edge_tuples = []
+            for edge_name in edge_names:
+                edge_idx = int(edge_name.replace("Edge", ""))
+                edge_tuples.append((edge_idx, 1.0, 1.0))
+                
+            fillet.Edges = tuple(edge_tuples)
+
+            # Construct array expression for Part::Fillet Edges property
+            array_items = [
+                f"tuple({t[0]}, {expr_str}, {expr_str})" for t in edge_tuples
+            ]
+            full_array_expr = f"tuple({', '.join(array_items)})"
+            fillet.setExpression("Edges", full_array_expr)
+
+        doc.commitTransaction()
+        doc.recompute()
+
+        # 5. Hide base target object and ensure new Fillet is visible
+        if hasattr(target_obj, "ViewObject") and target_obj.ViewObject:
+            target_obj.ViewObject.Visibility = False
+
+        if hasattr(fillet, "ViewObject") and fillet.ViewObject:
+            fillet.ViewObject.Visibility = True
+
+    except Exception as e:
+        doc.abortTransaction()
+        QtGui.QMessageBox.critical(
+            None,
+            "Error Creating Fillet",
+            f"Failed to apply fillet formula:\n{str(e)}",
+        )
+
+
+if __name__ == "__main__":
+    main()

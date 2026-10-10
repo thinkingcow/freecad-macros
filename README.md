@@ -28,3 +28,8 @@ modifications I've made are changes to the UI messages.
                  contrasting color
 - **chamfer_gears** adds chamfers to one or both sides of an fcgear generated planetary gear system
 - **on_text** Writes text onto the face of the specified object.
+
+## Realated resources
+- **spur_gear_calculator.html**  A standalone html page that calculates the sizes of
+             spur gears given the modulus and number of teeth.  Useful for back-of-the-envelope
+             gear train calculations
