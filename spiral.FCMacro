@@ -14,23 +14,19 @@ except ImportError:
 
 class ParametricSpiral:
     def __init__(self, obj, dia, turns, fill, prox, thick):
-        # Safely add properties first
         obj.addProperty("App::PropertyLength", "Diameter", "Spiral Parameters", "Outside diameter of the spiral")
         obj.addProperty("App::PropertyFloat", "Turns", "Spiral Parameters", "Number of turns")
         obj.addProperty("App::PropertyFloat", "FillPercent", "Spiral Parameters", "Percent of fill (1.0 to 99.9)")
-        obj.addProperty("App::PropertyFloat", "CenterProximity", "Spiral Parameters", "How close to the center it begins (100% = right to center, 50% = halfway)")
+        obj.addProperty("App::PropertyFloat", "CenterProximity", "Spiral Parameters", "How close to center it begins (100% = center, 50% = halfway)")
         obj.addProperty("App::PropertyLength", "Thickness", "Spiral Parameters", "Extrusion thickness")
         
-        # Then assign values
         obj.Diameter = dia
         obj.Turns = turns
         obj.FillPercent = fill
         obj.CenterProximity = prox
         obj.Thickness = thick
-        
         obj.Proxy = self
 
-    # Required for FreeCAD 1.0+ serialization to prevent hasher/topo warnings
     def __getstate__(self):
         return None
 
@@ -44,7 +40,6 @@ class ParametricSpiral:
         prox = fp.CenterProximity
         thickness = fp.Thickness
 
-        # Safety clamps
         if turns < 0.1: turns = 0.1
         if fill_pct <= 0: fill_pct = 0.1
         if fill_pct >= 100.0: fill_pct = 99.9
@@ -52,21 +47,13 @@ class ParametricSpiral:
         if prox < 0.1: prox = 0.1
         if prox > 100.0: prox = 100.0
 
-        # Math calculations
         R_out = diameter / 2.0
-        
-        # Calculate the starting radius based on the proximity percentage
-        # 100% -> (1.0 - 1.0) = 0 (Starts at center)
-        # 50%  -> (1.0 - 0.5) = 0.5 (Starts halfway)
         R_start = R_out * (1.0 - prox / 100.0)
-        
-        # The total radial distance the spiral is allowed to grow
         Delta_R = R_out - R_start
 
         N = turns
         f = fill_pct / 100.0
 
-        # W = Wire width, P = Pitch (distance between consecutive turns)
         P = Delta_R / (N + f)
         W = f * P
         b = P / (2 * math.pi)
@@ -101,7 +88,6 @@ class ParametricSpiral:
             App.Console.PrintError(f"Curve Interpolation failed: {str(e)}\n")
             return
 
-        # Extract exact topological vertices to perfectly close the wire
         p_in_start = edge_in.Vertexes[0].Point
         p_in_end = edge_in.Vertexes[-1].Point
         p_out_start = edge_out.Vertexes[0].Point
@@ -119,14 +105,15 @@ class ParametricSpiral:
         face = Part.Face(wire)
         
         if thickness > 0:
-            solid = face.extrude(App.Vector(0, 0, thickness))
+            # We extrude in the NEGATIVE Z direction so the top surface of the spiral 
+            # stays locked at Z=0. This allows it to lie perfectly flush when attached to a face.
+            solid = face.extrude(App.Vector(0, 0, -thickness))
             solid = solid.removeSplitter()
             fp.Shape = solid
         else:
             fp.Shape = face
 
 
-# Compliant ViewProvider for FreeCAD 1.1
 class ViewProviderSpiral:
     def __init__(self, vobj):
         vobj.Proxy = self
@@ -149,9 +136,10 @@ class ViewProviderSpiral:
 
 
 class SpiralGeneratorDialog(QtWidgets.QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, target_name=None):
         super().__init__(parent)
-        self.setWindowTitle("Create Parametric Spiral")
+        title = f"Inlay Spiral into {target_name}" if target_name else "Create Parametric Spiral"
+        self.setWindowTitle(title)
         self.setModal(True)
         self.layout = QtWidgets.QFormLayout(self)
 
@@ -180,7 +168,6 @@ class SpiralGeneratorDialog(QtWidgets.QDialog):
         self.prox_input.setDecimals(1)
         self.prox_input.setValue(100.0)
         self.prox_input.setSuffix(" %")
-        self.prox_input.setToolTip("100% starts at the center. 50% creates a hollow inner area half the size of the outer diameter.")
         self.layout.addRow("Center Proximity:", self.prox_input)
 
         self.thick_input = QtWidgets.QDoubleSpinBox()
@@ -195,23 +182,102 @@ class SpiralGeneratorDialog(QtWidgets.QDialog):
         self.button_box.rejected.connect(self.reject)
         self.layout.addRow(self.button_box)
 
-def create_parametric_spiral(dia, turns, fill, prox, thick):
+def create_parametric_spiral(dia, turns, fill, prox, thick, target_obj, target_face):
     doc = App.activeDocument()
     if doc is None:
         doc = App.newDocument()
 
-    obj = doc.addObject("Part::FeaturePython", "ExtrudedSpiral")
-    ParametricSpiral(obj, dia, turns, fill, prox, thick)
+    # Create the base spiral
+    spiral_obj = doc.addObject("Part::FeaturePython", "ExtrudedSpiral")
+    ParametricSpiral(spiral_obj, dia, turns, fill, prox, thick)
     
     if App.GuiUp:
-        ViewProviderSpiral(obj.ViewObject)
+        ViewProviderSpiral(spiral_obj.ViewObject)
+
+    # Handle Inlay / Boolean logic if a target is present
+    if target_obj is not None and target_face is not None:
+        try:
+            # Safely fetch the normal of the face at its center
+            uv = target_face.Surface.parameter(target_face.CenterOfMass)
+            normal = target_face.normalAt(uv[0], uv[1])
+            center = target_face.CenterOfMass
+            
+            # Mount the spiral's local coordinate system exactly to the face normal
+            placement = App.Placement()
+            placement.Base = center
+            placement.Rotation = App.Rotation(App.Vector(0, 0, 1), normal)
+            spiral_obj.Placement = placement
+            
+            # Boolean subtraction to create the pocket
+            cut = doc.addObject("Part::Cut", f"{target_obj.Name}_Pocket")
+            cut.Base = target_obj
+            cut.Tool = spiral_obj
+            
+        except Exception as e:
+            App.Console.PrintWarning(f"Failed to create Inlay pocket: {str(e)}\n")
 
     doc.recompute()
+
+    # View Cleanup: Standard Boolean Cut hides the tool. We override this so the user can see the inlay.
+    if App.GuiUp and target_obj and target_face:
+        target_obj.ViewObject.Visibility = False
+        cut.ViewObject.Visibility = True
+        spiral_obj.ViewObject.Visibility = True
+        # Tint the inlay Gold so it pops visually against the pocketed object
+        spiral_obj.ViewObject.ShapeColor = (1.0, 0.84, 0.0)
+
     Gui.SendMsgToActiveView("ViewFit")
 
 def run_macro():
     main_window = Gui.getMainWindow()
-    dialog = SpiralGeneratorDialog(main_window)
+    
+    # 1. Selection parsing logic
+    sel = Gui.Selection.getSelectionEx()
+    target_obj = None
+    target_face = None
+    
+    if len(sel) > 0:
+        selection = sel[0]
+        if hasattr(selection.Object, "Shape") and selection.Object.Shape:
+            target_obj = selection.Object
+            
+            # Check if the user explicitly clicked a single face
+            if selection.HasSubObjects:
+                for name in selection.SubElementNames:
+                    if name.startswith('Face'):
+                        target_face = target_obj.Shape.getElement(name)
+                        break
+            
+            # If no explicit face, mathematically find the one looking closest at the camera
+            if target_face is None and App.GuiUp:
+                try:
+                    view_dir = Gui.ActiveDocument.ActiveView.getViewDirection()
+                    best_face = None
+                    min_dist = float('inf')
+                    
+                    for f in target_obj.Shape.Faces:
+                        try:
+                            uv = f.Surface.parameter(f.CenterOfMass)
+                            normal = f.normalAt(uv[0], uv[1])
+                        except:
+                            continue
+                            
+                        # normal.dot(view_dir) < 0 means the face is pointing towards the camera
+                        if normal.dot(view_dir) < -1e-4:
+                            # Project its center into the camera view vector. 
+                            # The most negative value is the closest to the camera plane.
+                            dist = f.CenterOfMass.dot(view_dir)
+                            if dist < min_dist:
+                                min_dist = dist
+                                best_face = f
+                                
+                    target_face = best_face
+                except Exception as e:
+                    App.Console.PrintWarning(f"Could not determine face from view: {str(e)}\n")
+                    
+    # 2. Trigger Dialog
+    target_name = target_obj.Label if target_obj else None
+    dialog = SpiralGeneratorDialog(main_window, target_name)
     
     exec_func = getattr(dialog, "exec", dialog.exec_)
     
@@ -221,7 +287,7 @@ def run_macro():
         fill = dialog.fill_input.value()
         prox = dialog.prox_input.value()
         thick = dialog.thick_input.value()
-        create_parametric_spiral(dia, turns, fill, prox, thick)
+        create_parametric_spiral(dia, turns, fill, prox, thick, target_obj, target_face)
 
 if __name__ == "__main__":
     run_macro()

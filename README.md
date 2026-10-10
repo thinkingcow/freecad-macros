@@ -28,6 +28,10 @@ modifications I've made are changes to the UI messages.
                  contrasting color
 - **chamfer_gears** adds chamfers to one or both sides of an fcgear generated planetary gear system
 - **on_text** Writes text onto the face of the specified object.
+- **fillet**  The built-in fillet tool doesn't seem to support formulas for the
+             fillet Radius.  This is a version of the Fillet tool that does.  It's
+             not entirely general purpose, but works for me. It should work either in 
+             the "part" or "part design" workshops
 
 ## Realated resources
 - **spur_gear_calculator.html**  A standalone html page that calculates the sizes of
