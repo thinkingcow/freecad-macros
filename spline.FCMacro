@@ -1,7 +1,7 @@
 import FreeCAD
 import Part
 import math
-import __main__
+import __main__  # Required to register classes globally for copy/paste
 
 # Handle FreeCAD's PySide version transitions (FreeCAD 1.1 uses PySide6)
 try:
@@ -15,7 +15,8 @@ except ImportError:
 
 class SplinedCylinderFeature:
     """The Proxy class for our custom parametric FreeCAD object"""
-    def __init__(self, obj, radius, height, num_splines, protrusion, width, offset):
+    def __init__(self, obj, radius, height, num_splines, protrusion, width, offset, base_chamfer):
+        # Define the properties first, then assign the values.
         obj.addProperty("App::PropertyLength", "Radius", "Spline Parameters", "Radius of the base cylinder")
         obj.Radius = radius
         
@@ -33,76 +34,117 @@ class SplinedCylinderFeature:
         
         obj.addProperty("App::PropertyLength", "Offset", "Spline Parameters", "Chamfer start distance from the end")
         obj.Offset = offset
+
+        obj.addProperty("App::PropertyDistance", "BaseChamfer", "Spline Parameters", "Optional chamfer size on the base edge (negative for outward/inverted cut)")
+        obj.BaseChamfer = base_chamfer
         
         obj.Proxy = self
 
     def execute(self, obj):
+        """This method runs every time a property is changed in the property view"""
+        # Extract values (Handling FreeCAD's Quantity objects using .Value)
         radius = obj.Radius.Value
         height = obj.Height.Value
         num_splines = obj.NumSplines
         protrusion = obj.Protrusion.Value
         width = obj.SplineWidth.Value
         offset = obj.Offset.Value
+        base_chamfer = obj.BaseChamfer.Value
         
+        # Create the base cylinder geometry
         cyl = Part.makeCylinder(radius, height)
         
         if protrusion == 0 or num_splines <= 0:
-            obj.Shape = cyl
-            return
-            
-        offset = max(0.0, min(offset, height - 0.01))
-        overlap = max(1.0, abs(protrusion))
-        
-        if protrusion > 0:
-            x_overlap = radius - overlap
-            x_flush = radius
-            x_full = radius + protrusion
-        else:
-            x_overlap = radius + overlap
-            x_flush = radius
-            x_full = radius + protrusion
-            
-        z_start = offset
-        z_chamfer = offset + abs(protrusion)
-        z_end = height
-        
-        if z_chamfer > height:
-            ratio = (height - offset) / abs(protrusion)
-            x_full = radius + protrusion * ratio
-            z_chamfer = height
-            
-        pts = []
-        pts.append(FreeCAD.Vector(x_overlap, 0, z_start))
-        pts.append(FreeCAD.Vector(x_flush, 0, z_start))
-        pts.append(FreeCAD.Vector(x_full, 0, z_chamfer))
-        
-        if z_chamfer < height:
-            pts.append(FreeCAD.Vector(x_full, 0, z_end))
-            
-        pts.append(FreeCAD.Vector(x_overlap, 0, z_end))
-        pts.append(pts[0])
-        
-        poly = Part.makePolygon(pts)
-        face = Part.Face(poly)
-        
-        spline_tool = face.extrude(FreeCAD.Vector(0, width, 0))
-        spline_tool.translate(FreeCAD.Vector(0, -width / 2.0, 0))
-        
-        tools = []
-        for i in range(num_splines):
-            angle = (360.0 / num_splines) * i
-            tool = spline_tool.copy()
-            tool.rotate(FreeCAD.Vector(0,0,0), FreeCAD.Vector(0,0,1), angle)
-            tools.append(tool)
-            
-        if protrusion > 0:
             final_shape = cyl
-            for t in tools:
-                final_shape = final_shape.fuse(t)
         else:
-            comp = Part.makeCompound(tools)
-            final_shape = cyl.cut(comp)
+            # Prevent the offset from completely missing the cylinder
+            offset = max(0.0, min(offset, height - 0.01))
             
+            # Calculate geometric overlaps to ensure clean boolean operations
+            overlap = max(1.0, abs(protrusion))
+            
+            if protrusion > 0:
+                x_overlap = radius - overlap
+                x_flush = radius
+                x_full = radius + protrusion
+            else:
+                x_overlap = radius + overlap
+                x_flush = radius
+                x_full = radius + protrusion
+                
+            z_start = offset
+            z_chamfer = offset + abs(protrusion)
+            z_end = height
+            
+            # Handle edge case where chamfer length exceeds cylinder height
+            if z_chamfer > height:
+                ratio = (height - offset) / abs(protrusion)
+                x_full = radius + protrusion * ratio
+                z_chamfer = height
+                
+            # Build the 2D cross-section profile of the spline
+            pts = []
+            pts.append(FreeCAD.Vector(x_overlap, 0, z_start))
+            pts.append(FreeCAD.Vector(x_flush, 0, z_start))
+            pts.append(FreeCAD.Vector(x_full, 0, z_chamfer))
+            
+            if z_chamfer < height:
+                pts.append(FreeCAD.Vector(x_full, 0, z_end))
+                
+            pts.append(FreeCAD.Vector(x_overlap, 0, z_end))
+            pts.append(pts[0])
+            
+            poly = Part.makePolygon(pts)
+            face = Part.Face(poly)
+            
+            # Extrude to create the 3D spline tool and center it
+            spline_tool = face.extrude(FreeCAD.Vector(0, width, 0))
+            spline_tool.translate(FreeCAD.Vector(0, -width / 2.0, 0))
+            
+            # Generate the circular array of splines
+            tools = []
+            for i in range(num_splines):
+                angle = (360.0 / num_splines) * i
+                tool = spline_tool.copy()
+                tool.rotate(FreeCAD.Vector(0,0,0), FreeCAD.Vector(0,0,1), angle)
+                tools.append(tool)
+                
+            # Execute Boolean operations
+            if protrusion > 0:
+                final_shape = cyl
+                for t in tools:
+                    final_shape = final_shape.fuse(t)
+            else:
+                comp = Part.makeCompound(tools)
+                final_shape = cyl.cut(comp)
+
+        # Apply optional base chamfer on the edge where the offset is measured from (z = 0)
+        if abs(base_chamfer) > 1e-5:
+            mag = abs(base_chamfer)
+            mag = min(mag, radius - 0.01, height - 0.01)
+            
+            if base_chamfer > 0:
+                # Standard positive chamfer (diameter shrinks at the edge)
+                chamfer_edges = [e for e in final_shape.Edges if abs(e.BoundBox.ZMin) < 1e-6 and abs(e.BoundBox.ZMax) < 1e-6 and abs(e.Length - 2 * math.pi * radius) < 0.5]
+                if chamfer_edges:
+                    try:
+                        final_shape = final_shape.makeChamfer(mag, chamfer_edges)
+                    except Exception:
+                        pass
+            else:
+                # Negative chamfer: Diameter increases at the edge (outward expanded inverted cone cut)
+                try:
+                    # Construct an inverted cutting profile revolved around Z
+                    p1 = FreeCAD.Vector(radius, 0, 0)
+                    p2 = FreeCAD.Vector(radius + mag, 0, 0)
+                    p3 = FreeCAD.Vector(radius, 0, mag)
+                    inv_face = Part.Face(Part.makePolygon([p1, p2, p3, p1]))
+                    inv_solid = inv_face.revolve(FreeCAD.Vector(0,0,0), FreeCAD.Vector(0,0,1), 360)
+                    final_shape = final_shape.fuse(inv_solid)
+                except Exception:
+                    pass
+            
+        # Refine the shape and assign it to the object
         final_shape = final_shape.removeSplitter()
         obj.Shape = final_shape
 
@@ -137,16 +179,11 @@ class ViewProviderSplinedCylinder:
     def __setstate__(self, state):
         self.__dict__.update(state)
 
-
-# --- MACRO COPY/PASTE REGISTRATION ---
-# Explicitly inject classes into Python's global __main__ namespace and 
-# force their __module__ paths to match, satisfying FreeCAD's default unpickler.
+# --- THE COPY/PASTE FIX ---
+# Inject our proxy classes into the global __main__ module so they persist 
+# in FreeCAD's memory. This prevents the AttributeError during duplication.
 __main__.SplinedCylinderFeature = SplinedCylinderFeature
 __main__.ViewProviderSplinedCylinder = ViewProviderSplinedCylinder
-
-SplinedCylinderFeature.__module__ = "__main__"
-ViewProviderSplinedCylinder.__module__ = "__main__"
-# -------------------------------------
 
 
 class SplineDialog(QtWidgets.QDialog):
@@ -189,6 +226,12 @@ class SplineDialog(QtWidgets.QDialog):
         self.offset_input.setValue(2.0)
         self.layout.addRow("Chamfer Start Distance (mm):", self.offset_input)
 
+        self.base_chamfer_input = QtWidgets.QDoubleSpinBox()
+        self.base_chamfer_input.setRange(-100.0, 100.0)
+        self.base_chamfer_input.setSingleStep(0.2)
+        self.base_chamfer_input.setValue(0.0)
+        self.layout.addRow("Base Chamfer Size (+/- mm):", self.base_chamfer_input)
+
         self.buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
@@ -201,13 +244,15 @@ class SplineDialog(QtWidgets.QDialog):
             "splines": self.splines_input.value(),
             "protrusion": self.protrusion_input.value(),
             "width": self.width_input.value(),
-            "offset": self.offset_input.value()
+            "offset": self.offset_input.value(),
+            "base_chamfer": self.base_chamfer_input.value()
         }
 
 
 def main():
     dialog = SplineDialog()
     
+    # Compatibility execution handling
     exec_method = getattr(dialog, "exec", dialog.exec_)
     if exec_method():
         vals = dialog.get_values()
@@ -216,8 +261,10 @@ def main():
         if doc is None:
             doc = FreeCAD.newDocument()
             
+        # Create the FeaturePython object instead of a static shape
         part = doc.addObject("Part::FeaturePython", "SplinedCylinder")
         
+        # Attach our python proxies
         SplinedCylinderFeature(
             part, 
             vals["radius"], 
@@ -225,10 +272,12 @@ def main():
             vals["splines"], 
             vals["protrusion"], 
             vals["width"], 
-            vals["offset"]
+            vals["offset"],
+            vals["base_chamfer"]
         )
         ViewProviderSplinedCylinder(part.ViewObject)
         
+        # Recompute to draw the initial shape and fit the view
         doc.recompute()
         FreeCAD.Gui.SendMsgToActiveView("ViewFit")
 
