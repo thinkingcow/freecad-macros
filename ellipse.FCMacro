@@ -18,7 +18,11 @@ class EllipticalGear:
         obj.addProperty("App::PropertyFloat", "Module", "Gear", "Gear module in mm (m)").Module = 2.0
         obj.addProperty("App::PropertyFloat", "Thickness", "Gear", "Gear face thickness in mm").Thickness = 10.0
         obj.addProperty("App::PropertyAngle", "PressureAngle", "Gear", "Pressure angle").PressureAngle = 20.0
+        
+        # Bore hole properties
         obj.addProperty("App::PropertyFloat", "BoreRadius", "Bore", "Center bore hole radius in mm").BoreRadius = 10.0
+        obj.addProperty("App::PropertyFloat", "FocusBore1Radius", "Bore", "Focus 1 hole radius in mm (-c, 0)").FocusBore1Radius = 0.0
+        obj.addProperty("App::PropertyFloat", "FocusBore2Radius", "Bore", "Focus 2 hole radius in mm (+c, 0)").FocusBore2Radius = 0.0
 
         # ----------------------------------------------------
         # 2. READ-ONLY CALCULATED PROPERTIES
@@ -27,11 +31,13 @@ class EllipticalGear:
         obj.addProperty("App::PropertyLength", "MinorOutsideDiameter", "Gear Dimensions", "Outside minor axis diameter")
         obj.addProperty("App::PropertyLength", "MajorRootDiameter", "Gear Dimensions", "Root major axis diameter")
         obj.addProperty("App::PropertyLength", "MinorRootDiameter", "Gear Dimensions", "Root minor axis diameter")
+        obj.addProperty("App::PropertyLength", "FocalDistance", "Gear Dimensions", "Distance from geometric center to each focus (c)")
 
         obj.setEditorMode("MajorOutsideDiameter", 1)
         obj.setEditorMode("MinorOutsideDiameter", 1)
         obj.setEditorMode("MajorRootDiameter", 1)
         obj.setEditorMode("MinorRootDiameter", 1)
+        obj.setEditorMode("FocalDistance", 1)
 
     def execute(self, obj):
         """Recompute the OCC-valid 3D solid whenever any property is changed"""
@@ -39,8 +45,11 @@ class EllipticalGear:
         ar = max(0.1, float(obj.AspectRatio))
         m = max(0.001, float(obj.Module))
         thickness = max(0.001, float(obj.Thickness))
-        bore_radius = max(0.0, float(obj.BoreRadius))
         pressure_angle = float(obj.PressureAngle)
+        
+        bore_radius = max(0.0, float(obj.BoreRadius))
+        focus1_radius = max(0.0, float(obj.FocusBore1Radius))
+        focus2_radius = max(0.0, float(obj.FocusBore2Radius))
         
         # Target total pitch perimeter: L = pi * m * Z
         L_target = math.pi * m * Z
@@ -61,14 +70,18 @@ class EllipticalGear:
         a = L_target / unit_perimeter
         b = a / ar
 
-        # Update Read-Only Calculated Diameters
+        # Compute focal distance c = sqrt(a^2 - b^2)
+        c = math.sqrt(max(0.0, a**2 - b**2))
+
+        # Update Read-Only Calculated Properties with explicit unit values
         addendum = m
         dedendum = 1.25 * m
 
-        obj.MajorOutsideDiameter = 2.0 * (a + addendum)
-        obj.MinorOutsideDiameter = 2.0 * (b + addendum)
-        obj.MajorRootDiameter = 2.0 * (a - dedendum)
-        obj.MinorRootDiameter = 2.0 * (b - dedendum)
+        obj.MajorOutsideDiameter = FreeCAD.Units.Quantity(2.0 * (a + addendum), FreeCAD.Units.Length)
+        obj.MinorOutsideDiameter = FreeCAD.Units.Quantity(2.0 * (b + addendum), FreeCAD.Units.Length)
+        obj.MajorRootDiameter = FreeCAD.Units.Quantity(2.0 * (a - dedendum), FreeCAD.Units.Length)
+        obj.MinorRootDiameter = FreeCAD.Units.Quantity(2.0 * (b - dedendum), FreeCAD.Units.Length)
+        obj.FocalDistance = FreeCAD.Units.Quantity(c, FreeCAD.Units.Length)
         
         # Build ellipse arc length mapping table
         t_vals = [0.0]
@@ -230,17 +243,32 @@ class EllipticalGear:
         gear_wire = Part.Wire(polygon)
         gear_wire.fix(1e-3, 1e-3, 1e-3)
         
-        gear_face = Part.Face(gear_wire)
-        gear_face.validate()
+        final_face = Part.Face(gear_wire)
+        final_face.validate()
 
-        # Center Bore Hole (at 0,0,0)
+        # ----------------------------------------------------
+        # PROCESS BORE HOLES (Center & Dynamically Updated Foci)
+        # ----------------------------------------------------
+        bores_to_cut = []
+
+        # Center bore
         if bore_radius > 0.001:
-            bore_edge = Part.makeCircle(bore_radius, FreeCAD.Vector(0, 0, 0), FreeCAD.Vector(0, 0, 1))
-            bore_wire = Part.Wire([bore_edge])
-            bore_face = Part.Face(bore_wire)
-            final_face = gear_face.cut(bore_face)
-        else:
-            final_face = gear_face
+            edge = Part.makeCircle(bore_radius, FreeCAD.Vector(0, 0, 0), FreeCAD.Vector(0, 0, 1))
+            bores_to_cut.append(Part.Face(Part.Wire([edge])))
+
+        # Focus 1 (-c, 0)
+        if focus1_radius > 0.001 and c > 0.001:
+            edge1 = Part.makeCircle(focus1_radius, FreeCAD.Vector(-c, 0, 0), FreeCAD.Vector(0, 0, 1))
+            bores_to_cut.append(Part.Face(Part.Wire([edge1])))
+
+        # Focus 2 (+c, 0)
+        if focus2_radius > 0.001 and c > 0.001:
+            edge2 = Part.makeCircle(focus2_radius, FreeCAD.Vector(c, 0, 0), FreeCAD.Vector(0, 0, 1))
+            bores_to_cut.append(Part.Face(Part.Wire([edge2])))
+
+        # Cut all bore holes from main face
+        for b_face in bores_to_cut:
+            final_face = final_face.cut(b_face)
 
         # Extrude and clean up coplanar splitters for robust OCC Boolean operations
         gear_solid = final_face.extrude(FreeCAD.Vector(0, 0, thickness))
@@ -273,9 +301,7 @@ class ViewProviderEllipticalGear:
         return None
 
 
-# ----------------------------------------------------
-# EXPLICITLY REGISTER CLASSES IN MAIN MODULE SCOPE
-# ----------------------------------------------------
+# Explicitly register classes in main module scope
 sys.modules['__main__'].EllipticalGear = EllipticalGear
 sys.modules['__main__'].ViewProviderEllipticalGear = ViewProviderEllipticalGear
 

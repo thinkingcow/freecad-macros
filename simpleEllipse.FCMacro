@@ -1,0 +1,180 @@
+import FreeCAD
+import FreeCADGui
+import Part
+import math
+import sys
+
+class EllipticalDisk:
+    """Parametric Elliptical Disk Object for FreeCAD 1.1"""
+    def __init__(self, obj, defaults=None):
+        obj.Proxy = self
+        
+        if defaults is None:
+            defaults = {}
+
+        # Default values (from selected EllipticalGear or fallback)
+        default_ar = defaults.get("AspectRatio", 1.25)
+        default_thickness = defaults.get("Thickness", 10.0)
+        default_bore = defaults.get("BoreRadius", 10.0)
+        default_focus1 = defaults.get("FocusBore1Radius", 0.0)
+        default_focus2 = defaults.get("FocusBore2Radius", 0.0)
+        
+        # Determine base semi-major axis 'a' if gear properties are passed
+        default_a = 50.0
+        if "Teeth" in defaults and "Module" in defaults:
+            Z = defaults["Teeth"]
+            m = defaults["Module"]
+            L_target = math.pi * m * Z
+            
+            # Compute unit perimeter
+            num_samples = 2000
+            unit_perimeter = 0.0
+            inv_ar = 1.0 / default_ar
+            for i in range(num_samples):
+                t_mid = (i + 0.5) * 2.0 * math.pi / num_samples
+                dt = 2.0 * math.pi / num_samples
+                ds = math.sqrt(math.sin(t_mid)**2 + (inv_ar * math.cos(t_mid))**2) * dt
+                unit_perimeter += ds
+            default_a = L_target / unit_perimeter
+
+        # ----------------------------------------------------
+        # 1. USER-MODIFIABLE PROPERTIES
+        # ----------------------------------------------------
+        obj.addProperty("App::PropertyFloat", "MajorRadius", "Ellipse", "Semi-major axis radius (a) in mm").MajorRadius = default_a
+        obj.addProperty("App::PropertyFloat", "AspectRatio", "Ellipse", "Ratio of semi-major to semi-minor axis (a/b)").AspectRatio = default_ar
+        obj.addProperty("App::PropertyFloat", "Thickness", "Ellipse", "Disk thickness in mm").Thickness = default_thickness
+        
+        # Bore hole properties
+        obj.addProperty("App::PropertyFloat", "BoreRadius", "Bore", "Center bore hole radius in mm").BoreRadius = default_bore
+        obj.addProperty("App::PropertyFloat", "FocusBore1Radius", "Bore", "Focus 1 hole radius in mm (-c, 0)").FocusBore1Radius = default_focus1
+        obj.addProperty("App::PropertyFloat", "FocusBore2Radius", "Bore", "Focus 2 hole radius in mm (+c, 0)").FocusBore2Radius = default_focus2
+
+        # ----------------------------------------------------
+        # 2. READ-ONLY CALCULATED PROPERTIES
+        # ----------------------------------------------------
+        obj.addProperty("App::PropertyLength", "MajorDiameter", "Ellipse Dimensions", "Major axis diameter (2a)")
+        obj.addProperty("App::PropertyLength", "MinorDiameter", "Ellipse Dimensions", "Minor axis diameter (2b)")
+        obj.addProperty("App::PropertyLength", "FocalDistance", "Ellipse Dimensions", "Distance from center to focus (c)")
+
+        obj.setEditorMode("MajorDiameter", 1)
+        obj.setEditorMode("MinorDiameter", 1)
+        obj.setEditorMode("FocalDistance", 1)
+
+    def execute(self, obj):
+        """Recompute the 3D solid whenever any property changes"""
+        a = max(0.001, float(obj.MajorRadius))
+        ar = max(0.1, float(obj.AspectRatio))
+        b = a / ar
+        thickness = max(0.001, float(obj.Thickness))
+        
+        bore_radius = max(0.0, float(obj.BoreRadius))
+        focus1_radius = max(0.0, float(obj.FocusBore1Radius))
+        focus2_radius = max(0.0, float(obj.FocusBore2Radius))
+
+        # Compute focal distance c = sqrt(a^2 - b^2)
+        c = math.sqrt(max(0.0, a**2 - b**2))
+
+        # Update Read-Only Calculated Properties
+        obj.MajorDiameter = 2.0 * a
+        obj.MinorDiameter = 2.0 * b
+        obj.FocalDistance = c
+
+        # ----------------------------------------------------
+        # CREATE BASE ELLIPSE EDGE (CORRECTED API)
+        # ----------------------------------------------------
+        # Part.Ellipse takes (Center, MajorRadius, MinorRadius)
+        geom_ellipse = Part.Ellipse(FreeCAD.Vector(0, 0, 0), a, b)
+        ellipse_edge = geom_ellipse.toShape()
+        ellipse_wire = Part.Wire([ellipse_edge])
+        final_face = Part.Face(ellipse_wire)
+
+        # ----------------------------------------------------
+        # PROCESS BORE HOLES (Center & Foci)
+        # ----------------------------------------------------
+        bores_to_cut = []
+
+        # Center bore
+        if bore_radius > 0.001:
+            edge = Part.makeCircle(bore_radius, FreeCAD.Vector(0, 0, 0), FreeCAD.Vector(0, 0, 1))
+            bores_to_cut.append(Part.Face(Part.Wire([edge])))
+
+        # Focus 1 (-c, 0)
+        if focus1_radius > 0.001:
+            edge1 = Part.makeCircle(focus1_radius, FreeCAD.Vector(-c, 0, 0), FreeCAD.Vector(0, 0, 1))
+            bores_to_cut.append(Part.Face(Part.Wire([edge1])))
+
+        # Focus 2 (+c, 0)
+        if focus2_radius > 0.001:
+            edge2 = Part.makeCircle(focus2_radius, FreeCAD.Vector(c, 0, 0), FreeCAD.Vector(0, 0, 1))
+            bores_to_cut.append(Part.Face(Part.Wire([edge2])))
+
+        # Cut all bore holes from main face
+        for b_face in bores_to_cut:
+            final_face = final_face.cut(b_face)
+
+        # Extrude and clean up coplanar splitters
+        disk_solid = final_face.extrude(FreeCAD.Vector(0, 0, thickness))
+        try:
+            disk_solid = disk_solid.removeSplitter()
+        except Exception:
+            pass
+            
+        obj.Shape = disk_solid
+
+
+class ViewProviderEllipticalDisk:
+    """View provider class for FreeCAD GUI integration"""
+    def __init__(self, vobj):
+        vobj.Proxy = self
+
+    def attach(self, vobj):
+        self.ViewObject = vobj
+
+    def getDefaultDisplayMode(self):
+        return "Shaded"
+
+    def getIcon(self):
+        return ""
+
+    def __getstate__(self):
+        return None
+
+    def __setstate__(self, state):
+        return None
+
+
+# Explicitly register classes in main module scope
+sys.modules['__main__'].EllipticalDisk = EllipticalDisk
+sys.modules['__main__'].ViewProviderEllipticalDisk = ViewProviderEllipticalDisk
+
+
+def makeEllipticalDisk():
+    doc = FreeCAD.activeDocument()
+    if doc is None:
+        doc = FreeCAD.newDocument("EllipticalDiskDoc")
+
+    defaults = {}
+
+    # Inspect selection for an existing EllipticalGear object
+    if FreeCAD.GuiUp:
+        selection = FreeCADGui.Selection.getSelection()
+        if selection:
+            sel_obj = selection[0]
+            # Read properties if it's an EllipticalGear object
+            props_to_copy = ["AspectRatio", "Thickness", "BoreRadius", "FocusBore1Radius", "FocusBore2Radius", "Teeth", "Module"]
+            for prop in props_to_copy:
+                if hasattr(sel_obj, prop):
+                    defaults[prop] = float(getattr(sel_obj, prop))
+
+    obj = doc.addObject("Part::FeaturePython", "EllipticalDisk")
+    EllipticalDisk(obj, defaults)
+    
+    if FreeCAD.GuiUp and obj.ViewObject is not None:
+        ViewProviderEllipticalDisk(obj.ViewObject)
+        
+    doc.recompute()
+    if FreeCAD.GuiUp:
+        FreeCADGui.SendMsgToActiveView("ViewFit")
+
+if __name__ == "__main__":
+    makeEllipticalDisk()

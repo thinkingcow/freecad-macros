@@ -1,0 +1,152 @@
+import FreeCAD as App
+import FreeCADGui as Gui
+from PySide import QtWidgets, QtCore
+
+def create_varset_macro():
+    doc = App.ActiveDocument
+    if not doc:
+        QtWidgets.QMessageBox.warning(None, "No Active Document", "Please open a document first.")
+        return
+
+    # 1. Prompt user for substring match
+    substring, ok = QtWidgets.QInputDialog.getText(
+        None, 
+        "Filter Objects", 
+        "Enter substring to match object labels/names:"
+    )
+    if not ok or not substring.strip():
+        return
+
+    substring = substring.strip().lower()
+
+    # Find matching objects
+    matched_objs = [
+        obj for obj in doc.Objects 
+        if substring in obj.Label.lower() or substring in obj.Name.lower()
+    ]
+
+    if not matched_objs:
+        QtWidgets.QMessageBox.information(
+            None, "No Matches", f"No objects found containing '{substring}'."
+        )
+        return
+
+    # 2. Identify properties common to ALL matched objects
+    common_props = set(matched_objs[0].PropertiesList)
+    for obj in matched_objs[1:]:
+        common_props.intersection_update(obj.PropertiesList)
+
+    # Filter out base/system properties, hidden properties starting with '_', and read-only properties
+    ignored_props = {
+        "ExpressionEngine", "Label", "Label2", "Name", "Visibility", 
+        "MemSize", "NoTouch", "OldLabel", "State", "Type", "Placement"
+    }
+
+    valid_props = []
+    for prop_name in sorted(common_props):
+        # Skip properties starting with '_'
+        if prop_name.startswith("_"):
+            continue
+
+        # Skip known base/system properties
+        if prop_name in ignored_props:
+            continue
+
+        # Skip core App::Property base attributes
+        ref_type = matched_objs[0].getTypeIdOfProperty(prop_name)
+        if ref_type.startswith("App::Property") and prop_name in ("ExpressionEngine", "Label", "Name", "State"):
+            continue
+
+        # Check read-only status across all matched objects
+        is_read_only = False
+        for obj in matched_objs:
+            status = obj.getPropertyStatus(prop_name)
+            if status and ("ReadOnly" in status or 1 in status):
+                is_read_only = True
+                break
+
+        if not is_read_only:
+            valid_props.append(prop_name)
+
+    if not valid_props:
+        QtWidgets.QMessageBox.information(
+            None, 
+            "No Modifiable Common Properties", 
+            "No common, customizable properties found among matched objects."
+        )
+        return
+
+    # 3. Prompt user to select properties to include in the VarSet
+    dialog = QtWidgets.QDialog()
+    dialog.setWindowTitle("Select Properties for VarSet")
+    dialog.resize(350, 450)
+    layout = QtWidgets.QVBoxLayout(dialog)
+
+    layout.addWidget(QtWidgets.QLabel(f"Matched {len(matched_objs)} object(s). Select properties to link:"))
+
+    list_widget = QtWidgets.QListWidget()
+    for prop in valid_props:
+        item = QtWidgets.QListWidgetItem(prop)
+        item.setFlags(item.flags() | QtCore.Qt.ItemIsUserCheckable)
+        item.setCheckState(QtCore.Qt.Unchecked)
+        list_widget.addItem(item)
+    layout.addWidget(list_widget)
+
+    button_box = QtWidgets.QDialogButtonBox(
+        QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
+    )
+    layout.addWidget(button_box)
+    button_box.accepted.connect(dialog.accept)
+    button_box.rejected.connect(dialog.reject)
+
+    if dialog.exec_() != QtWidgets.QDialog.Accepted:
+        return
+
+    selected_props = [
+        list_widget.item(i).text() 
+        for i in range(list_widget.count()) 
+        if list_widget.item(i).checkState() == QtCore.Qt.Checked
+    ]
+
+    if not selected_props:
+        return
+
+    # 4. Create the VarSet object
+    varset = doc.addObject("App::VarSet", "VarSet")
+    varset.Label = f"VarSet_{substring.title()}"
+
+    # 5. Populate VarSet and expression-link target properties
+    doc.openTransaction("Create VarSet Links")
+
+    try:
+        ref_obj = matched_objs[0]
+
+        for prop_name in selected_props:
+            prop_type = ref_obj.getTypeIdOfProperty(prop_name)
+            prop_val = getattr(ref_obj, prop_name)
+
+            # Add dynamic property to VarSet using matching type and name
+            varset.addProperty(prop_type, prop_name, "Parameters", f"Shared {prop_name}")
+            setattr(varset, prop_name, prop_val)
+
+            # Link matched objects to VarSet via Expression Engine
+            for obj in matched_objs:
+                expression_str = f"{varset.Name}.{prop_name}"
+                obj.setExpression(prop_name, expression_str)
+
+        doc.commitTransaction()
+        doc.recompute()
+
+        QtWidgets.QMessageBox.information(
+            None, 
+            "Success", 
+            f"Created '{varset.Label}' with {len(selected_props)} properties.\n"
+            f"Linked across {len(matched_objs)} object(s)."
+        )
+
+    except Exception as e:
+        doc.abortTransaction()
+        QtWidgets.QMessageBox.critical(None, "Error", f"Failed to create VarSet links:\n{str(e)}")
+
+# Run macro
+create_varset_macro()

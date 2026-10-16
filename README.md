@@ -31,7 +31,8 @@ modifications I've made are changes to the UI messages.
                    splines adding friction for a tighter fit.  The splines
                    work on either the male or female (with subtraction)
                    sides the connection.
-- **ellipse**    Creates an elliptical involute gear.
+- **ellipse**    Creates an elliptical involute gear, with (optional) holes at the
+                 center and foci
 - **spiral**     Creates an archimedes spiral.  If another object is selected, it insets
                  the spiral into the face of the object to make it easy to print in a
                  contrasting color
@@ -41,6 +42,10 @@ modifications I've made are changes to the UI messages.
               fillet Radius.  This is a version of the Fillet tool that does.  It's
               not entirely general purpose, but works for me. It should work either in 
               the "part" or "part design" workshops
+- **move_polar** Allows interactively moving an object in polar coordinates, using an
+              linked VarSet.  The Varset can be safely removed as needed.
+- **extract_to_varset**  A persistant version of "Group-Edit" that creates a varset
+              of linked properties, allowing ongoing changes to linked properties
 
 ## Realated resources
 - **spur_gear_calculator.html**  A standalone html page that calculates the sizes of
