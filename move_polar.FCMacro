@@ -1,0 +1,110 @@
+import math
+import FreeCAD as App
+import FreeCADGui as Gui
+
+class PolarVarSetObserver:
+    """Document observer that handles dynamic recomputation and dependency cleanup on deletion."""
+    def __init__(self, varset_name, target_obj_name):
+        self.varset_name = varset_name
+        self.target_obj_name = target_obj_name
+
+    def slotChangedObject(self, obj, prop):
+        # Trigger recompute when 'r', 'theta', or 'phi' change on the target VarSet
+        if obj.Name == self.varset_name and prop in ("r", "theta", "phi"):
+            if obj.Document:
+                obj.Document.recompute()
+
+    def slotDeletedObject(self, obj):
+        # If the created VarSet is deleted, remove expression bindings on the target object
+        if obj.Name == self.varset_name:
+            doc = App.ActiveDocument
+            if doc:
+                target_obj = doc.getObject(self.target_obj_name)
+                if target_obj:
+                    # Clear expressions so target keeps its current static placement
+                    target_obj.setExpression("Placement.Base.x", None)
+                    target_obj.setExpression("Placement.Base.y", None)
+                    target_obj.setExpression("Placement.Base.z", None)
+                    App.Console.PrintMessage(
+                        f"VarSet '{self.varset_name}' deleted: Expression bindings removed from '{target_obj.Label}'.\n"
+                    )
+            # Remove this observer since the tracked VarSet no longer exists
+            try:
+                App.removeDocumentObserver(self)
+            except Exception:
+                pass
+
+def create_auto_spherical_varset_macro():
+    doc = App.ActiveDocument
+    if not doc:
+        App.Console.PrintError("No active document found.\n")
+        return
+
+    # 1. Validate selection
+    selection = Gui.Selection.getSelection()
+    if len(selection) != 2:
+        App.Console.PrintError("Selection Error: Please select exactly 2 objects.\n"
+                               "First object: Center reference\n"
+                               "Second object: Target object (position driven by spherical vars)\n")
+        return
+
+    center_obj = selection[0]
+    target_obj = selection[1]
+
+    # 2. Calculate initial relative offsets in 3D spherical space
+    center_pos = center_obj.Placement.Base
+    target_pos = target_obj.Placement.Base
+
+    dx = target_pos.x - center_pos.x
+    dy = target_pos.y - center_pos.y
+    dz = target_pos.z - center_pos.z
+
+    r_xy = math.hypot(dx, dy)
+    r_initial = math.sqrt(dx**2 + dy**2 + dz**2)
+    theta_initial = math.degrees(math.atan2(dy, dx))
+    phi_initial = math.degrees(math.atan2(dz, r_xy))
+
+    doc.openTransaction("Create Auto-Updating Polar VarSet")
+
+    try:
+        # 3. Create VarSet object with "PolarVars" label prefix
+        varset_name = f"VarSet_{target_obj.Name}"
+        varset = doc.addObject("App::VarSet", varset_name)
+        varset.Label = f"PolarVars_{target_obj.Label}"
+
+        # 4. Add properties sequentially (r -> theta -> phi)
+        varset.addProperty("App::PropertyLength", "r", "Polar", "3D radial distance from center object")
+        varset.addProperty("App::PropertyAngle", "theta", "Polar", "Azimuthal angle in XY plane")
+        varset.addProperty("App::PropertyAngle", "phi", "Polar", "Elevation angle above/below XY plane")
+
+        # Set values
+        varset.r = r_initial
+        varset.theta = theta_initial
+        varset.phi = phi_initial
+
+        # 5. Bind expressions using spherical trigonometry formulas
+        expr_x = f"{center_obj.Name}.Placement.Base.x + {varset.Name}.r * cos({varset.Name}.phi) * cos({varset.Name}.theta)"
+        expr_y = f"{center_obj.Name}.Placement.Base.y + {varset.Name}.r * cos({varset.Name}.phi) * sin({varset.Name}.theta)"
+        expr_z = f"{center_obj.Name}.Placement.Base.z + {varset.Name}.r * sin({varset.Name}.phi)"
+
+        target_obj.setExpression("Placement.Base.x", expr_x)
+        target_obj.setExpression("Placement.Base.y", expr_y)
+        target_obj.setExpression("Placement.Base.z", expr_z)
+
+        # 6. Attach Document Observer to auto-recompute on change AND remove expressions on VarSet deletion
+        observer = PolarVarSetObserver(varset.Name, target_obj.Name)
+        App.addDocumentObserver(observer)
+
+        doc.commitTransaction()
+        doc.recompute()
+
+        App.Console.PrintMessage(f"Created spherical VarSet '{varset.Label}'.\n"
+                                 f"Editing 'r', 'theta', or 'phi' will instantly reposition '{target_obj.Label}'.\n"
+                                 f"Deleting '{varset.Label}' will safely unbind expressions.\n")
+
+    except Exception as e:
+        doc.abortTransaction()
+        App.Console.PrintError(f"Macro failed with error: {str(e)}\n")
+
+# Run macro
+create_auto_spherical_varset_macro()
