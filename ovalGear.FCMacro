@@ -1,0 +1,304 @@
+import FreeCAD
+import FreeCADGui
+import Part
+import math
+import bisect
+import sys
+
+class OvalGear2Lobe:
+    """Parametric 2-Lobe Oval Gear Object for FreeCAD 1.1"""
+    def __init__(self, obj):
+        obj.Proxy = self
+        
+        # ----------------------------------------------------
+        # 1. USER-MODIFIABLE PROPERTIES
+        # ----------------------------------------------------
+        obj.addProperty("App::PropertyInteger", "Teeth", "Gear", "Number of teeth (Z)").Teeth = 32
+        obj.addProperty("App::PropertyFloat", "AspectRatio", "Gear", "Ratio of major to minor radius (a/b)").AspectRatio = 1.25
+        obj.addProperty("App::PropertyFloat", "Module", "Gear", "Gear module in mm (m)").Module = 2.0
+        obj.addProperty("App::PropertyFloat", "Thickness", "Gear", "Gear face thickness in mm").Thickness = 10.0
+        obj.addProperty("App::PropertyAngle", "PressureAngle", "Gear", "Pressure angle").PressureAngle = 20.0
+        
+        # Bore hole properties (Centered at geometric center)
+        obj.addProperty("App::PropertyFloat", "BoreRadius", "Bore", "Center bore hole radius in mm").BoreRadius = 10.0
+
+        # ----------------------------------------------------
+        # 2. READ-ONLY CALCULATED PROPERTIES
+        # ----------------------------------------------------
+        obj.addProperty("App::PropertyLength", "MajorRadius", "Gear Dimensions", "Maximum pitch radius (a)")
+        obj.addProperty("App::PropertyLength", "MinorRadius", "Gear Dimensions", "Minimum pitch radius (b)")
+        obj.addProperty("App::PropertyLength", "Eccentricity", "Gear Dimensions", "Oval eccentricity (e)")
+        obj.addProperty("App::PropertyLength", "CenterDistance", "Gear Dimensions", "Center-to-center distance between meshing 90-deg oval gears")
+
+        obj.setEditorMode("MajorRadius", 1)
+        obj.setEditorMode("MinorRadius", 1)
+        obj.setEditorMode("Eccentricity", 1)
+        obj.setEditorMode("CenterDistance", 1)
+
+    def execute(self, obj):
+        """Recompute the OCC-valid 3D solid for the 2-lobe oval gear"""
+        Z = max(4, int(obj.Teeth))
+        ar = max(1.01, float(obj.AspectRatio))
+        m = max(0.001, float(obj.Module))
+        thickness = max(0.001, float(obj.Thickness))
+        pressure_angle = float(obj.PressureAngle)
+        bore_radius = max(0.0, float(obj.BoreRadius))
+        
+        # Target total pitch perimeter: L = pi * m * Z
+        L_target = math.pi * m * Z
+        
+        # 2-Lobe Oval Gear Geometry (Centered at Geometric Origin)
+        e = math.sqrt(1.0 - (1.0 / ar**2))
+        
+        num_samples = 5000
+        unit_perimeter = 0.0
+        
+        def get_unit_r_and_dr(theta):
+            denom = 1.0 + e * math.cos(2.0 * theta)
+            r = (1.0 - e**2) / denom
+            dr_dth = (2.0 * e * (1.0 - e**2) * math.sin(2.0 * theta)) / (denom**2)
+            return r, dr_dth
+
+        for i in range(num_samples):
+            t_prev = i * 2.0 * math.pi / num_samples
+            t_curr = (i + 1) * 2.0 * math.pi / num_samples
+            t_mid = (t_prev + t_curr) / 2.0
+            dt = t_curr - t_prev
+            
+            r_m, dr_m = get_unit_r_and_dr(t_mid)
+            ds_unit = math.sqrt(r_m**2 + dr_m**2) * dt
+            unit_perimeter += ds_unit
+            
+        a = L_target / unit_perimeter
+        b = a / ar
+
+        # Center distance for two identical 90-deg meshing 2-lobe oval gears equals 2 * a (r_max + r_min)
+        center_distance = 2.0 * a
+
+        obj.MajorRadius = FreeCAD.Units.Quantity(a, FreeCAD.Units.Length)
+        obj.MinorRadius = FreeCAD.Units.Quantity(b, FreeCAD.Units.Length)
+        obj.Eccentricity = FreeCAD.Units.Quantity(e, FreeCAD.Units.Length)
+        obj.CenterDistance = FreeCAD.Units.Quantity(center_distance, FreeCAD.Units.Length)
+        
+        # Build arc length mapping table for 2-lobe oval pitch curve
+        t_vals = [0.0]
+        s_vals = [0.0]
+        current_s = 0.0
+        
+        for i in range(1, num_samples + 1):
+            t_prev = (i - 1) * 2.0 * math.pi / num_samples
+            t_curr = i * 2.0 * math.pi / num_samples
+            t_mid = (t_prev + t_curr) / 2.0
+            dt = t_curr - t_prev
+            
+            denom = 1.0 + e * math.cos(2.0 * t_mid)
+            r_val = a * (1.0 - e**2) / denom
+            dr_dth = (2.0 * e * a * (1.0 - e**2) * math.sin(2.0 * t_mid)) / (denom**2)
+            
+            ds = math.sqrt(r_val**2 + dr_dth**2) * dt
+            current_s += ds
+            t_vals.append(t_curr)
+            s_vals.append(current_s)
+
+        L = s_vals[-1]
+        p = L / Z
+        alpha = math.radians(pressure_angle)
+
+        def get_t_for_s(target_s):
+            target_s = target_s % L
+            if target_s < 0:
+                target_s += L
+            idx = bisect.bisect_left(s_vals, target_s)
+            if idx == 0:
+                return t_vals[0]
+            if idx >= len(s_vals):
+                return t_vals[-1]
+            s0, s1 = s_vals[idx-1], s_vals[idx]
+            t0, t1 = t_vals[idx-1], t_vals[idx]
+            if s1 == s0:
+                return t0
+            return t0 + (target_s - s0) / (s1 - s0) * (t1 - t0)
+
+        addendum = m
+        dedendum = 1.25 * m
+
+        def get_root_point_global(s_val):
+            t_c = get_t_for_s(s_val)
+            denom = 1.0 + e * math.cos(2.0 * t_c)
+            r_val = a * (1.0 - e**2) / denom
+            dr_dth = (2.0 * e * a * (1.0 - e**2) * math.sin(2.0 * t_c)) / (denom**2)
+            
+            Px = r_val * math.cos(t_c)
+            Py = r_val * math.sin(t_c)
+            
+            dx = dr_dth * math.cos(t_c) - r_val * math.sin(t_c)
+            dy = dr_dth * math.sin(t_c) + r_val * math.cos(t_c)
+            length = math.sqrt(dx**2 + dy**2)
+            Tx = dx / length
+            Ty = dy / length
+            Nx = -Ty
+            Ny = Tx
+            
+            Rx = Px + dedendum * Nx
+            Ry = Py + dedendum * Ny
+            return FreeCAD.Vector(Rx, Ry, 0)
+
+        all_global_points = []
+
+        for i in range(Z):
+            s_c = i * p
+            t_c = get_t_for_s(s_c)
+            
+            denom = 1.0 + e * math.cos(2.0 * t_c)
+            r_val = a * (1.0 - e**2) / denom
+            dr_dth = (2.0 * e * a * (1.0 - e**2) * math.sin(2.0 * t_c)) / (denom**2)
+            
+            Px = r_val * math.cos(t_c)
+            Py = r_val * math.sin(t_c)
+            
+            dx = dr_dth * math.cos(t_c) - r_val * math.sin(t_c)
+            dy = dr_dth * math.sin(t_c) + r_val * math.cos(t_c)
+            length = math.sqrt(dx**2 + dy**2)
+            Tx = dx / length
+            Ty = dy / length
+            
+            rho = (r_val**2 + dr_dth**2)**1.5 / (r_val**2 + 2.0 * dr_dth**2 - r_val * (
+                (4.0 * e * a * (1.0 - e**2) * math.cos(2.0 * t_c)) / denom**2 - 
+                (8.0 * e**2 * a * (1.0 - e**2) * math.sin(2.0 * t_c)**2) / denom**3
+            ))
+            R = abs(rho)
+            
+            pitch_angle = math.pi * m / R
+            W = pitch_angle / 2.0
+            r_a = R + m
+            r_d = R - 1.25 * m
+            R_b = R * math.cos(alpha)
+            
+            inv_alpha = math.tan(alpha) - alpha
+            theta_0_right = math.pi/2 - W/2 - inv_alpha
+            theta_0_left  = math.pi/2 + W/2 + inv_alpha
+            
+            pt_root_start = get_root_point_global(s_c - p/2.0)
+            pt_root_end   = get_root_point_global(s_c + p/2.0)
+
+            if r_d >= R_b:
+                phi_min = math.sqrt((r_d/R_b)**2 - 1.0)
+                theta_root_left = theta_0_left - (phi_min - math.atan(phi_min))
+                theta_root_right = theta_0_right + (phi_min - math.atan(phi_min))
+            else:
+                phi_min = 0.0
+                theta_root_left = theta_0_left
+                theta_root_right = theta_0_right
+                
+            phi_max = math.sqrt((r_a/R_b)**2 - 1.0)
+            
+            def local_to_global(r_loc, th):
+                lx = r_loc * math.cos(th)
+                ly = r_loc * math.sin(th) - R
+                gx = Px + lx * Tx + ly * Ty
+                gy = Py + lx * Ty - ly * Tx
+                return FreeCAD.Vector(gx, gy, 0)
+
+            tooth_pts = [pt_root_start]
+            num_arc = 4
+            for j in range(1, num_arc):
+                frac = j / float(num_arc)
+                tooth_pts.append(pt_root_start.add(local_to_global(r_d, theta_root_left).sub(pt_root_start).multiply(frac)))
+
+            num_inv = 12
+            for j in range(1, num_inv):
+                phi = phi_min + (phi_max - phi_min) * j / (num_inv - 1)
+                r_loc = R_b * math.sqrt(1 + phi**2)
+                th = theta_0_left - (phi - math.atan(phi))
+                tooth_pts.append(local_to_global(r_loc, th))
+
+            theta_left_top = theta_0_left - (phi_max - math.atan(phi_max))
+            theta_right_top = theta_0_right + (phi_max - math.atan(phi_max))
+            for j in range(1, num_arc):
+                th = theta_left_top + (theta_right_top - theta_left_top) * j / (num_arc - 1)
+                tooth_pts.append(local_to_global(r_a, th))
+
+            for j in range(1, num_inv):
+                phi = phi_max - (phi_max - phi_min) * j / (num_inv - 1)
+                r_loc = R_b * math.sqrt(1 + phi**2)
+                th = theta_0_right + (phi - math.atan(phi))
+                tooth_pts.append(local_to_global(r_loc, th))
+
+            pt_inv_right_base = local_to_global(r_d, theta_root_right)
+            for j in range(1, num_arc):
+                frac = j / float(num_arc)
+                tooth_pts.append(pt_inv_right_base.add(pt_root_end.sub(pt_inv_right_base).multiply(frac)))
+
+            tooth_pts.append(pt_root_end)
+            all_global_points.extend(tooth_pts)
+
+        cleaned_points = [all_global_points[0]]
+        for p_pt in all_global_points[1:]:
+            if (p_pt - cleaned_points[-1]).Length > 1e-4:
+                cleaned_points.append(p_pt)
+
+        if (cleaned_points[-1] - cleaned_points[0]).Length > 1e-4:
+            cleaned_points.append(cleaned_points[0])
+
+        polygon = Part.makePolygon(cleaned_points)
+        gear_wire = Part.Wire(polygon)
+        gear_wire.fix(1e-3, 1e-3, 1e-3)
+        
+        final_face = Part.Face(gear_wire)
+        final_face.validate()
+
+        if bore_radius > 0.001:
+            edge = Part.makeCircle(bore_radius, FreeCAD.Vector(0, 0, 0), FreeCAD.Vector(0, 0, 1))
+            bore_face = Part.Face(Part.Wire([edge]))
+            final_face = final_face.cut(bore_face)
+
+        gear_solid = final_face.extrude(FreeCAD.Vector(0, 0, thickness))
+        try:
+            gear_solid = gear_solid.removeSplitter()
+        except Exception:
+            pass
+            
+        obj.Shape = gear_solid
+
+
+class ViewProviderOvalGear2Lobe:
+    def __init__(self, vobj):
+        vobj.Proxy = self
+
+    def attach(self, vobj):
+        self.ViewObject = vobj
+
+    def getDefaultDisplayMode(self):
+        return "Shaded"
+
+    def getIcon(self):
+        return ""
+
+    def __getstate__(self):
+        return None
+
+    def __setstate__(self, state):
+        return None
+
+
+sys.modules['__main__'].OvalGear2Lobe = OvalGear2Lobe
+sys.modules['__main__'].ViewProviderOvalGear2Lobe = ViewProviderOvalGear2Lobe
+
+
+def makeOvalGear2Lobe():
+    doc = FreeCAD.activeDocument()
+    if doc is None:
+        doc = FreeCAD.newDocument("OvalGear2LobeDoc")
+        
+    obj = doc.addObject("Part::FeaturePython", "OvalGear2Lobe")
+    OvalGear2Lobe(obj)
+    
+    if FreeCAD.GuiUp and obj.ViewObject is not None:
+        ViewProviderOvalGear2Lobe(obj.ViewObject)
+        
+    doc.recompute()
+    if FreeCAD.GuiUp:
+        FreeCADGui.SendMsgToActiveView("ViewFit")
+
+if __name__ == "__main__":
+    makeOvalGear2Lobe()

@@ -46,6 +46,8 @@ modifications I've made are changes to the UI messages.
               linked VarSet.  The Varset can be safely removed as needed.
 - **extract_to_varset**  A persistant version of "Group-Edit" that creates a varset
               of linked properties, allowing ongoing changes to linked properties
+- **simpleEllipse** create a companion (e.g. similar) ellipse to the elliptical
+             gear created with "ellipse"
 
 ## Realated resources
 - **spur_gear_calculator.html**  A standalone html page that calculates the sizes of
@@ -58,9 +60,3 @@ modifications I've made are changes to the UI messages.
   python library prerequisited into the appImage version of freecad.
 
 ## TODO
-
-- Modify ellipse gear creation to (optionally) put holes at the focii,
-  and allow the generation of a similar ellipse without teeth
-
-- Modify the **group_edit** and **dup_around** macro tos create a proper VarSet that will connect property
-  values for the subset of parameters of the user's choosing
