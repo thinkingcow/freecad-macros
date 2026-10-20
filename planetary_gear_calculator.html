@@ -1,27 +1,49 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Involute Planetary Gear Calculator</title>
     <style>
-        /* Modern Compact Dark Engineering Theme */
-        :root {
-            --bg-color: #0d1117;
-            --panel-bg: #161b22;
-            --panel-border: #30363d;
-            --text-main: #c9d1d9;
-            --text-muted: #8b949e;
-            --accent-sun: #38adf8;
+        /* Modern High-Density Engineering Theme with CSS Variables for Light/Dark Mode */
+        :root[data-theme="dark"] {
+            --bg-color: #0b0f17;
+            --panel-bg: #131924;
+            --panel-border: #232d3f;
+            --text-main: #e2e8f0;
+            --text-muted: #94a3b8;
+            --accent-sun: #38bdf8;
             --accent-planet: #fbbf24;
             --accent-ring: #34d399;
             --accent-carrier: #a78bfa;
-            --pass-color: #2ea043;
-            --fail-color: #f85149;
-            --warn-color: #d29922;
-            --input-bg: #0d1117;
-            --font-mono: ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, Liberation Mono, monospace;
-            --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            --pass-color: #22c55e;
+            --fail-color: #ef4444;
+            --warn-color: #f59e0b;
+            --input-bg: #0b0f17;
+            --tooltip-bg: #1e293b;
+            --tooltip-text: #f8fafc;
+            --table-hover: rgba(255, 255, 255, 0.03);
+            --header-bg: #131924;
+        }
+
+        :root[data-theme="light"] {
+            --bg-color: #f1f5f9;
+            --panel-bg: #ffffff;
+            --panel-border: #cbd5e1;
+            --text-main: #0f172a;
+            --text-muted: #64748b;
+            --accent-sun: #0284c7;
+            --accent-planet: #d97706;
+            --accent-ring: #059669;
+            --accent-carrier: #7c3aed;
+            --pass-color: #16a34a;
+            --fail-color: #dc2626;
+            --warn-color: #d97706;
+            --input-bg: #f8fafc;
+            --tooltip-bg: #0f172a;
+            --tooltip-text: #ffffff;
+            --table-hover: rgba(0, 0, 0, 0.03);
+            --header-bg: #ffffff;
         }
 
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -29,23 +51,24 @@
         body {
             background-color: var(--bg-color);
             color: var(--text-main);
-            font-family: var(--font-sans);
-            font-size: 12px;
-            line-height: 1.3;
-            padding: 10px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            font-size: 14px; /* Increased base font size */
+            line-height: 1.25;
+            padding: 8px;
             min-height: 100vh;
+            transition: background-color 0.2s ease, color 0.2s ease;
         }
 
-        /* Layout Grid */
+        /* Layout Grid - Reduced Spacing */
         .container {
-            max-w: 1280px;
+            max-width: 1380px;
             margin: 0 auto;
             display: grid;
-            grid-template-columns: 340px 1fr;
-            gap: 10px;
+            grid-template-columns: 360px 1fr;
+            gap: 8px; /* Ultra-compact gap */
         }
 
-        @media (max-width: 900px) {
+        @media (max-width: 960px) {
             .container { grid-template-columns: 1fr; }
         }
 
@@ -55,61 +78,66 @@
             justify-content: space-between;
             align-items: center;
             padding: 6px 12px;
-            background: var(--panel-bg);
+            background: var(--header-bg);
             border: 1px solid var(--panel-border);
             border-radius: 6px;
         }
 
         .header h1 {
-            font-size: 14px;
+            font-size: 16px;
             font-weight: 700;
-            color: #f0f6fc;
             display: flex;
             align-items: center;
             gap: 8px;
         }
 
-        .header-sub {
-            font-size: 11px;
-            color: var(--text-muted);
-            font-family: var(--font-mono);
+        .header-controls {
+            display: flex;
+            align-items: center;
+            gap: 12px;
         }
 
-        /* Panels & Cards */
+        .header-sub {
+            font-size: 12px;
+            color: var(--text-muted);
+            font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+        }
+
+        /* Panels & Compact Cards */
         .panel {
             background: var(--panel-bg);
             border: 1px solid var(--panel-border);
             border-radius: 6px;
-            padding: 10px;
+            padding: 8px; /* Reduced padding */
             display: flex;
             flex-direction: column;
-            gap: 10px;
+            gap: 6px; /* Tight whitespace */
         }
 
         .panel-title {
-            font-size: 11px;
+            font-size: 12px;
             font-weight: 700;
             text-transform: uppercase;
             letter-spacing: 0.5px;
             color: var(--text-muted);
             border-bottom: 1px solid var(--panel-border);
-            padding-bottom: 4px;
+            padding-bottom: 3px;
             display: flex;
             justify-content: space-between;
             align-items: center;
         }
 
-        /* Form Controls */
+        /* Form Controls - Dense Layout */
         .control-group {
             display: flex;
             flex-direction: column;
-            gap: 6px;
+            gap: 4px;
         }
 
         .mode-selector {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
-            gap: 4px;
+            gap: 3px;
             background: var(--bg-color);
             padding: 2px;
             border-radius: 4px;
@@ -118,19 +146,19 @@
 
         .mode-selector label {
             text-align: center;
-            padding: 4px;
-            font-size: 10px;
+            padding: 3px;
+            font-size: 11px;
             cursor: pointer;
             border-radius: 3px;
             color: var(--text-muted);
-            transition: all 0.15s ease;
+            user-select: none;
         }
 
         .mode-selector input { display: none; }
         .mode-selector input:checked + span {
             background: var(--panel-border);
-            color: #fff;
-            font-weight: 600;
+            color: var(--text-main);
+            font-weight: 700;
         }
 
         .mode-selector span {
@@ -141,34 +169,35 @@
 
         .input-row {
             display: grid;
-            grid-template-columns: 1fr 100px;
+            grid-template-columns: 1fr 110px;
             align-items: center;
-            gap: 8px;
+            gap: 6px;
         }
 
         .input-label {
             display: flex;
             align-items: center;
-            gap: 4px;
-            font-size: 11px;
+            gap: 5px;
+            font-size: 13px;
             font-weight: 500;
         }
 
         .color-dot {
-            width: 8px;
-            height: 8px;
+            width: 9px;
+            height: 9px;
             border-radius: 50%;
             display: inline-block;
+            flex-shrink: 0;
         }
 
         input[type="number"], select {
             background: var(--input-bg);
             border: 1px solid var(--panel-border);
-            color: #f0f6fc;
+            color: var(--text-main);
             padding: 4px 6px;
             border-radius: 4px;
-            font-family: var(--font-mono);
-            font-size: 11px;
+            font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+            font-size: 13px;
             width: 100%;
             text-align: right;
         }
@@ -179,106 +208,106 @@
         }
 
         input:disabled {
-            opacity: 0.5;
+            opacity: 0.4;
             cursor: not-allowed;
-            background: #161b22;
         }
 
-        /* Tooltip Component */
-        .tooltip-target {
-            cursor: help;
-            border-bottom: 1px dashed var(--text-muted);
-            position: relative;
-        }
-
-        .has-tooltip {
-            position: relative;
+        /* Tooltip Component - Enhanced Pure CSS Tooltips */
+        .tooltip-icon {
             display: inline-flex;
             align-items: center;
-        }
-
-        .tooltip-icon {
-            display: inline-block;
-            width: 12px;
-            height: 12px;
-            line-height: 12px;
-            text-align: center;
+            justify-content: center;
+            width: 14px;
+            height: 14px;
             border-radius: 50%;
             background: var(--panel-border);
             color: var(--text-muted);
-            font-size: 9px;
-            font-family: var(--font-mono);
-            margin-left: 3px;
+            font-size: 10px;
+            font-family: ui-monospace, SFMono-Regular, monospace;
+            cursor: help;
+            margin-left: 2px;
+            flex-shrink: 0;
+        }
+
+        [data-tooltip] {
+            position: relative;
             cursor: help;
         }
 
-        /* Pure CSS Tooltip popup */
-        [data-tooltip] { position: relative; }
-        [data-tooltip]:hover::before {
+        [data-tooltip]::after {
             content: attr(data-tooltip);
             position: absolute;
             bottom: 125%;
             left: 50%;
             transform: translateX(-50%);
-            background: #24292e;
-            color: #f0f6fc;
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 10px;
-            font-family: var(--font-sans);
-            white-space: max-content;
-            max-width: 200px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
-            border: 1px solid var(--panel-border);
-            z-index: 100;
-            pointer-events: none;
+            background: var(--tooltip-bg);
+            color: var(--tooltip-text);
+            padding: 5px 9px;
+            border-radius: 5px;
+            font-size: 11px;
             font-weight: normal;
-            line-height: 1.2;
+            line-height: 1.3;
+            white-space: normal;
+            width: max-content;
+            max-width: 230px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            border: 1px solid var(--panel-border);
+            z-index: 1000;
+            pointer-events: none;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.15s ease, visibility 0.15s ease;
+            text-align: left;
         }
 
-        /* Diagnostics List */
+        [data-tooltip]:hover::after {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        /* Diagnostics Banner List */
         .diag-list {
             display: flex;
             flex-direction: column;
-            gap: 4px;
+            gap: 3px;
         }
 
         .diag-item {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 4px 6px;
+            padding: 3px 6px;
             background: var(--bg-color);
             border: 1px solid var(--panel-border);
             border-radius: 4px;
-            font-size: 11px;
+            font-size: 12px;
         }
 
         .diag-status {
             font-weight: 700;
-            font-family: var(--font-mono);
-            font-size: 10px;
-            padding: 1px 4px;
-            border-radius: 2px;
+            font-family: ui-monospace, SFMono-Regular, monospace;
+            font-size: 11px;
+            padding: 1px 5px;
+            border-radius: 3px;
         }
 
-        .status-pass { background: rgba(46, 160, 67, 0.15); color: var(--pass-color); }
-        .status-fail { background: rgba(248, 81, 73, 0.15); color: var(--fail-color); }
-        .status-warn { background: rgba(210, 153, 34, 0.15); color: var(--warn-color); }
+        .status-pass { background: rgba(34, 197, 94, 0.15); color: var(--pass-color); }
+        .status-fail { background: rgba(239, 68, 68, 0.15); color: var(--fail-color); }
+        .status-warn { background: rgba(245, 158, 11, 0.15); color: var(--warn-color); }
 
-        /* Results Display Layout */
+        /* Visualization & Controls */
         .right-col {
             display: flex;
             flex-direction: column;
-            gap: 10px;
+            gap: 8px;
         }
 
         .viz-container {
             position: relative;
-            background: #05070a;
+            background: var(--input-bg);
             border: 1px solid var(--panel-border);
             border-radius: 6px;
-            height: 380px;
+            height: 360px;
             display: flex;
             justify-content: center;
             align-items: center;
@@ -292,32 +321,49 @@
 
         .viz-controls {
             position: absolute;
-            top: 8px;
-            right: 8px;
+            top: 6px;
+            right: 6px;
             display: flex;
-            gap: 6px;
-            background: rgba(22, 27, 34, 0.85);
-            backdrop-filter: blur(4px);
-            padding: 4px;
-            border-radius: 4px;
+            align-items: center;
+            gap: 8px;
+            background: var(--panel-bg);
+            padding: 4px 8px;
+            border-radius: 5px;
             border: 1px solid var(--panel-border);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
         }
 
         .btn {
             background: var(--panel-border);
-            color: #f0f6fc;
+            color: var(--text-main);
             border: none;
-            padding: 3px 8px;
-            border-radius: 3px;
-            font-size: 10px;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 12px;
             cursor: pointer;
             font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
         }
 
-        .btn:hover { background: #444c56; }
-        .btn.active { background: var(--accent-sun); color: #000; }
+        .btn:hover { opacity: 0.9; }
+        .btn.active { background: var(--accent-sun); color: #ffffff; }
 
-        /* Data Table */
+        .speed-slider {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        .speed-slider input[type="range"] {
+            width: 70px;
+            accent-color: var(--accent-sun);
+        }
+
+        /* Data Table Styles */
         .table-wrapper {
             overflow-x: auto;
         }
@@ -325,13 +371,13 @@
         table.data-table {
             width: 100%;
             border-collapse: collapse;
-            font-family: var(--font-mono);
-            font-size: 11px;
+            font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+            font-size: 13px; /* Increased table font size */
             text-align: right;
         }
 
         table.data-table th, table.data-table td {
-            padding: 5px 8px;
+            padding: 4px 8px; /* Compact padding */
             border-bottom: 1px solid var(--panel-border);
         }
 
@@ -339,31 +385,51 @@
             text-align: right;
             color: var(--text-muted);
             font-weight: 600;
-            font-family: var(--font-sans);
-            font-size: 10px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            font-size: 11px;
             text-transform: uppercase;
             background: var(--bg-color);
         }
 
         table.data-table th:first-child, table.data-table td:first-child {
             text-align: left;
-            font-family: var(--font-sans);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         }
 
         table.data-table tr:hover {
-            background: rgba(255, 255, 255, 0.02);
+            background: var(--table-hover);
         }
 
-        .val-sun { color: var(--accent-sun); }
-        .val-planet { color: var(--accent-planet); }
-        .val-ring { color: var(--accent-ring); }
+        .term-header {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-weight: 600;
+        }
+
+        .val-sun { color: var(--accent-sun); font-weight: 600; }
+        .val-planet { color: var(--accent-planet); font-weight: 600; }
+        .val-ring { color: var(--accent-ring); font-weight: 600; }
 
         .summary-badge {
             display: inline-block;
-            padding: 2px 6px;
-            border-radius: 10px;
-            font-size: 10px;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 11px;
             font-weight: bold;
+        }
+
+        .theme-toggle {
+            cursor: pointer;
+            background: none;
+            border: 1px solid var(--panel-border);
+            color: var(--text-main);
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
         }
     </style>
 </head>
@@ -371,26 +437,31 @@
 
     <div class="container">
         
-        <!-- Header -->
+        <!-- Top Header -->
         <div class="header">
             <h1>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent-sun)"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent-sun)"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
                 Involute Planetary Gear System
             </h1>
-            <span class="header-sub">ISO/AGMA Spur Synthesizer</span>
+            <div class="header-controls">
+                <span class="header-sub">ISO / AGMA Synthesizer</span>
+                <button class="theme-toggle" id="themeToggleBtn">
+                    <span id="themeIcon">☀️</span> Light
+                </button>
+            </div>
         </div>
 
-        <!-- Left Column: Input Configuration & Feasibility -->
+        <!-- Left Controls Column -->
         <div class="panel">
             
             <div class="panel-title">
-                Synthesis Parameters
-                <span class="has-tooltip" data-tooltip="Select 2 known tooth counts to calculate the 3rd">
+                Synthesis Input
+                <span data-tooltip="Select any 2 known tooth counts to calculate the 3rd target automatically">
                     <span class="tooltip-icon">?</span>
                 </span>
             </div>
 
-            <!-- Solve Target Selector -->
+            <!-- Solve Mode Selector -->
             <div class="control-group">
                 <div class="mode-selector">
                     <label>
@@ -413,7 +484,7 @@
                 <div class="input-row">
                     <label class="input-label" for="inp_Ns">
                         <span class="color-dot" style="background:var(--accent-sun)"></span>
-                        Sun Teeth (Ns)
+                        Sun Teeth (Zs)
                     </label>
                     <input type="number" id="inp_Ns" value="18" min="8" max="500">
                 </div>
@@ -421,7 +492,7 @@
                 <div class="input-row">
                     <label class="input-label" for="inp_Np">
                         <span class="color-dot" style="background:var(--accent-planet)"></span>
-                        Planet Teeth (Np)
+                        Planet Teeth (Zp)
                     </label>
                     <input type="number" id="inp_Np" value="18" min="8" max="500">
                 </div>
@@ -429,79 +500,86 @@
                 <div class="input-row">
                     <label class="input-label" for="inp_Nr">
                         <span class="color-dot" style="background:var(--accent-ring)"></span>
-                        Ring Teeth (Nr)
+                        Ring Teeth (Zr)
                     </label>
                     <input type="number" id="inp_Nr" value="54" min="16" max="1000" disabled>
                 </div>
             </div>
 
-            <div class="panel-title" style="margin-top:4px;">
+            <div class="panel-title" style="margin-top:2px;">
                 Module & Configuration
             </div>
 
             <div class="control-group">
                 <div class="input-row">
-                    <label class="input-label has-tooltip" data-tooltip="Number of planet gears (K)">
-                        Planets (K)
-                        <span class="tooltip-icon">?</span>
+                    <label class="input-label">
+                        Planets (Np)
+                        <span data-tooltip="Number of planet gears distributed symmetrically around the sun gear">
+                            <span class="tooltip-icon">?</span>
+                        </span>
                     </label>
                     <select id="inp_K">
+                        <option value="2">2</option>
                         <option value="3" selected>3</option>
                         <option value="4">4</option>
                         <option value="5">5</option>
                         <option value="6">6</option>
-                        <option value="7">7</option>
-                        <option value="8">8</option>
-                        <option value="9">9</option>
                     </select>
                 </div>
 
                 <div class="input-row">
-                    <label class="input-label has-tooltip" data-tooltip="Gear module m in mm (Pitch diameter / Teeth)">
+                    <label class="input-label">
                         Module (m) [mm]
-                        <span class="tooltip-icon">?</span>
+                        <span data-tooltip="Gear module m in mm (Pitch Diameter / Teeth Count)">
+                            <span class="tooltip-icon">?</span>
+                        </span>
                     </label>
                     <input type="number" id="inp_m" value="2.0" step="0.1" min="0.1">
                 </div>
 
                 <div class="input-row">
-                    <label class="input-label has-tooltip" data-tooltip="Standard pressure angle alpha (usually 20 deg)">
+                    <label class="input-label">
                         Pressure Angle (α)
-                        <span class="tooltip-icon">?</span>
+                        <span data-tooltip="Standard pressure angle α (typically 20° for involute gears)">
+                            <span class="tooltip-icon">?</span>
+                        </span>
                     </label>
                     <input type="number" id="inp_alpha" value="20" step="0.5" min="5" max="35">
                 </div>
             </div>
 
-            <!-- Diagnostics Check list -->
-            <div class="panel-title" style="margin-top:4px;">
-                System Validity Checks
+            <!-- Diagnostics Validation Section -->
+            <div class="panel-title" style="margin-top:2px;">
+                Feasibility Diagnostics
                 <span id="overallBadge" class="summary-badge status-pass">VALID</span>
             </div>
 
             <div class="diag-list" id="diagContainer">
-                <!-- Dynamic feasibility items inserted here -->
+                <!-- Validity Items Inserted Dynamic -->
             </div>
 
         </div>
 
-        <!-- Right Column: Canvas Diagram & Comprehensive Geometry -->
+        <!-- Right Output Column -->
         <div class="right-col">
             
-            <!-- SVG Gear Schematic -->
+            <!-- SVG Interactive Canvas -->
             <div class="viz-container">
                 <div class="viz-controls">
-                    <button class="btn" id="btnAnim">Animate</button>
-                    <button class="btn" id="btnLayers">Circles</button>
+                    <button class="btn" id="btnAnim">▶ Play</button>
+                    <div class="speed-slider">
+                        <span>Speed</span>
+                        <input type="range" id="animSpeed" min="0.2" max="3" step="0.1" value="1">
+                    </div>
                 </div>
                 <svg id="gearSvg" viewBox="-200 -200 400 400"></svg>
             </div>
 
-            <!-- Gear Geometry Dimensions Table -->
+            <!-- Detailed Gear Geometry Table -->
             <div class="panel">
                 <div class="panel-title">
                     Gear Geometry Breakdown
-                    <span class="has-tooltip" data-tooltip="All dimensions in mm based on standard involute gear proportions">
+                    <span data-tooltip="Comprehensive ISO/AGMA involute gear parameter breakdown for all system gears">
                         <span class="tooltip-icon">?</span>
                     </span>
                 </div>
@@ -511,13 +589,13 @@
                         <thead>
                             <tr>
                                 <th>Parameter</th>
-                                <th>Sun (Ns)</th>
-                                <th>Planet (Np)</th>
-                                <th>Ring (Nr)</th>
+                                <th>Sun (Zs)</th>
+                                <th>Planet (Zp)</th>
+                                <th>Ring (Zr)</th>
                             </tr>
                         </thead>
                         <tbody id="geomTableBody">
-                            <!-- Dynamic Table Rows -->
+                            <!-- Rows with tooltips injected by JS -->
                         </tbody>
                     </table>
                 </div>
@@ -532,7 +610,7 @@
         let isAnimating = false;
         let animFrameId = null;
         let animAngle = 0;
-        let showReferenceCircles = true;
+        let animSpeedMultiplier = 1.0;
 
         const inputs = {
             solveMode: document.getElementsByName('solveMode'),
@@ -541,10 +619,23 @@
             Nr: document.getElementById('inp_Nr'),
             K: document.getElementById('inp_K'),
             m: document.getElementById('inp_m'),
-            alpha: document.getElementById('inp_alpha')
+            alpha: document.getElementById('inp_alpha'),
+            speed: document.getElementById('animSpeed')
         };
 
-        // --- Event Listeners Setup ---
+        // Theme Toggle Logic
+        const themeBtn = document.getElementById('themeToggleBtn');
+        const themeIcon = document.getElementById('themeIcon');
+        
+        themeBtn.addEventListener('click', () => {
+            const currentTheme = document.documentElement.getAttribute('data-theme');
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+            document.documentElement.setAttribute('data-theme', newTheme);
+            themeIcon.innerText = newTheme === 'dark' ? '☀️' : '🌙';
+            themeBtn.childNodes[1].nodeValue = newTheme === 'dark' ? ' Light' : ' Dark';
+        });
+
+        // Event Listeners
         Array.from(inputs.solveMode).forEach(radio => {
             radio.addEventListener('change', () => {
                 updateDisabledInputs();
@@ -556,18 +647,16 @@
             elem.addEventListener('input', recalculate);
         });
 
+        inputs.speed.addEventListener('input', (e) => {
+            animSpeedMultiplier = parseFloat(e.target.value) || 1.0;
+        });
+
         document.getElementById('btnAnim').addEventListener('click', function() {
             isAnimating = !isAnimating;
             this.classList.toggle('active', isAnimating);
-            this.innerText = isAnimating ? 'Pause' : 'Animate';
+            this.innerText = isAnimating ? '⏸ Pause' : '▶ Play';
             if (isAnimating) animateLoop();
             else cancelAnimationFrame(animFrameId);
-        });
-
-        document.getElementById('btnLayers').addEventListener('click', function() {
-            showReferenceCircles = !showReferenceCircles;
-            this.classList.toggle('active', showReferenceCircles);
-            renderSVG();
         });
 
         function updateDisabledInputs() {
@@ -584,7 +673,7 @@
             return 'ring';
         }
 
-        // --- Core Calculation & Synthesis Logic ---
+        // --- Gear Mathematics & Synthesis ---
         function recalculate() {
             const mode = getSelectedSolveMode();
             let Ns = parseInt(inputs.Ns.value) || 0;
@@ -595,7 +684,7 @@
             const alphaDeg = parseFloat(inputs.alpha.value) || 20.0;
             const alphaRad = (alphaDeg * Math.PI) / 180.0;
 
-            // Synthesis equation: Nr = Ns + 2*Np
+            // Synthesis: Zr = Zs + 2*Zp
             if (mode === 'ring') {
                 Nr = Ns + 2 * Np;
                 inputs.Nr.value = Nr;
@@ -607,59 +696,57 @@
                 inputs.Ns.value = Ns;
             }
 
-            // Perform Validity Checks
-            const checks = runValidityChecks(Ns, Np, Nr, K, alphaDeg);
+            // Checks & Geometry Calculations
+            const checks = runValidityChecks(Ns, Np, Nr, K, alphaDeg, m);
             updateValidityUI(checks);
 
-            // Calculate Gear Geometry
             const geom = computeGeometry(Ns, Np, Nr, m, alphaRad);
             renderGeometryTable(geom);
 
-            // Store state for SVG renderer
             window.currentGearState = { Ns, Np, Nr, K, m, alphaRad, geom, isValid: checks.allValid };
             renderSVG();
         }
 
-        function runValidityChecks(Ns, Np, Nr, K, alphaDeg) {
+        function runValidityChecks(Ns, Np, Nr, K, alphaDeg, m) {
             const checks = [];
 
-            // 1. Coaxiality Condition (Nr = Ns + 2*Np)
+            // 1. Coaxiality Condition (Zr = Zs + 2*Zp)
             const isCoaxial = (Nr === Ns + 2 * Np) && (Ns > 0) && (Np > 0) && (Nr > 0);
             checks.push({
-                name: "Coaxiality (Nr = Ns + 2·Np)",
+                name: "Coaxiality (Zr = Zs + 2·Zp)",
                 passed: isCoaxial,
-                tooltip: "Ring gear teeth must equal Sun teeth plus twice Planet teeth"
+                tooltip: "Centerlines of Sun, Planets, and Ring must align coaxially"
             });
 
-            // 2. Assembly / Indexing Condition ((Ns + Nr) / K must be an integer)
+            // 2. Assembly / Mesh Phase Condition ((Zs + Zr) / Np must be integer)
             const assemblySum = Ns + Nr;
             const isAssemblyValid = Number.isInteger(assemblySum / K);
             checks.push({
-                name: `Assembly ((Ns+Nr)/K = ${(assemblySum/K).toFixed(2)})`,
+                name: `Assembly Phase ((Zs+Zr)/Np = ${(assemblySum/K).toFixed(2)})`,
                 passed: isAssemblyValid,
-                tooltip: "(Ns + Nr) / Number_of_Planets must be a whole integer for symmetric spacing"
+                tooltip: "(Zs + Zr) divided by planet count must yield a whole integer for symmetric planet insertion"
             });
 
             // 3. Adjacent Planet Non-Interference Check
-            // Tip-to-tip clearance: Sin(pi/K) > (Np + 2) / (Ns + Np)
-            const lhs = Math.sin(Math.PI / K);
-            const rhs = (Np + 2) / (Ns + Np);
-            const noInterference = lhs > rhs;
+            const centerDist = (m * (Ns + Np)) / 2;
+            const planetTipDiam = m * (Np + 2);
+            const planetDistBetweenCenters = 2 * centerDist * Math.sin(Math.PI / K);
+            const noInterference = planetDistBetweenCenters > planetTipDiam;
             checks.push({
-                name: "Planet Tip Non-Interference",
+                name: "Planet Clearance (2·asp·sin(π/Np) > da,p)",
                 passed: noInterference,
-                tooltip: "Verifies adjacent planets do not physically collide tip-to-tip"
+                tooltip: "Ensures adjacent planet gear tips do not physically collide with one another"
             });
 
-            // 4. Undercutting Check (Min teeth without shift ~ 17 for 20 deg)
+            // 4. Undercutting Check (Z >= 17 for 20 deg pressure angle)
             const minTeethTheoretical = 2 / Math.pow(Math.sin((alphaDeg * Math.PI) / 180), 2);
             const minTeeth = Math.ceil(minTeethTheoretical);
             const noUndercut = (Ns >= minTeeth) && (Np >= minTeeth);
             checks.push({
-                name: `Undercut Avoidance (N ≥ ${minTeeth})`,
+                name: `Undercut Avoidance (Z ≥ ${minTeeth})`,
                 passed: noUndercut,
                 warningOnly: true,
-                tooltip: `Gears with fewer than ~${minTeeth} teeth suffer involute undercutting unless profile shifted`
+                tooltip: `Teeth count under ~${minTeeth} exhibits involute profile undercut during gear cutting unless profile shifted`
             });
 
             const allValid = checks.every(c => c.passed || c.warningOnly);
@@ -678,7 +765,7 @@
                 let statusText = c.passed ? 'PASS' : (c.warningOnly ? 'WARN' : 'FAIL');
 
                 return `
-                    <div class="diag-item has-tooltip" data-tooltip="${c.tooltip}">
+                    <div class="diag-item" data-tooltip="${c.tooltip}">
                         <span>${c.name}</span>
                         <span class="diag-status ${statusClass}">${statusText}</span>
                     </div>
@@ -687,21 +774,24 @@
         }
 
         function computeGeometry(Ns, Np, Nr, m, alphaRad) {
-            const calcGear = (N, isInternal = false) => {
-                const d = m * N; // Pitch Diameter
-                const db = d * Math.cos(alphaRad); // Base Diameter
+            const calcGear = (Z, isInternal = false) => {
+                const d = m * Z;                      // Pitch Diameter
+                const db = d * Math.cos(alphaRad);   // Base Diameter
+                const ha = 1.0 * m;                  // Addendum
+                const hf = 1.25 * m;                 // Dedendum
+                const p = Math.PI * m;               // Circular Tooth Pitch
                 
                 let da, df, d_rim;
                 if (!isInternal) {
-                    da = m * (N + 2);     // Tip/Outer Diameter
-                    df = m * (N - 2.5);   // Root Diameter
+                    da = d + 2 * ha;                 // Outer / Tip Diameter
+                    df = d - 2 * hf;                 // Root Diameter
                 } else {
-                    da = m * (N - 2);     // Inside Tip Diameter for internal ring
-                    df = m * (N + 2.5);   // Root Diameter for internal ring
-                    d_rim = m * (N + 6);  // Estimated Outer Rim Diameter
+                    da = d - 2 * ha;                 // Inside Tip Diameter (Ring)
+                    df = d + 2 * hf;                 // Root Diameter (Ring)
+                    d_rim = d + 2 * hf + 3 * m;      // Outer Rim Diameter
                 }
 
-                return { N, d, db, da, df, d_rim };
+                return { Z, d, db, da, df, ha, hf, p, d_rim };
             };
 
             return {
@@ -716,27 +806,85 @@
             const tbody = document.getElementById('geomTableBody');
 
             const rows = [
-                { name: 'Number of Teeth (N)', key: 'N', fmt: v => v },
-                { name: 'Pitch Diameter (d)', key: 'd', fmt: v => v.toFixed(2) + ' mm' },
-                { name: 'Base Diameter (db)', key: 'db', fmt: v => v.toFixed(2) + ' mm' },
-                { name: 'Tip / Inside Diameter (da)', key: 'da', fmt: v => v.toFixed(2) + ' mm' },
-                { name: 'Root Diameter (df)', key: 'df', fmt: v => v.toFixed(2) + ' mm' },
-                { name: 'Outer Rim Diameter (Ring)', key: 'd_rim', fmt: v => v ? v.toFixed(2) + ' mm' : '-' }
+                {
+                    name: 'Number of Teeth (Z)',
+                    key: 'Z',
+                    tooltip: 'Total count of gear teeth',
+                    fmt: v => v
+                },
+                {
+                    name: 'Pitch Diameter (d)',
+                    key: 'd',
+                    tooltip: 'Standard pitch circle diameter where theoretical gear mesh occurs (d = m · Z)',
+                    fmt: v => v.toFixed(2) + ' mm'
+                },
+                {
+                    name: 'Base Diameter (db)',
+                    key: 'db',
+                    tooltip: 'Base circle diameter from which the involute tooth curve originates (db = d · cos α)',
+                    fmt: v => v.toFixed(2) + ' mm'
+                },
+                {
+                    name: 'Outer / Tip Diameter (da)',
+                    key: 'da',
+                    tooltip: 'Outside crest diameter for external gears (Sun/Planet), or internal crest diameter for Ring gear',
+                    fmt: v => v.toFixed(2) + ' mm'
+                },
+                {
+                    name: 'Root Diameter (df)',
+                    key: 'df',
+                    tooltip: 'Diameter at the base of the gear tooth space (root circle)',
+                    fmt: v => v.toFixed(2) + ' mm'
+                },
+                {
+                    name: 'Addendum (ha)',
+                    key: 'ha',
+                    tooltip: 'Radial distance between pitch circle and tooth tip (ha = 1.0 · m)',
+                    fmt: v => v.toFixed(2) + ' mm'
+                },
+                {
+                    name: 'Dedendum (hf)',
+                    key: 'hf',
+                    tooltip: 'Radial distance between pitch circle and tooth root (hf = 1.25 · m)',
+                    fmt: v => v.toFixed(2) + ' mm'
+                },
+                {
+                    name: 'Circular Pitch (p)',
+                    key: 'p',
+                    tooltip: 'Arc distance along the pitch circle between corresponding points of adjacent teeth (p = π · m)',
+                    fmt: v => v.toFixed(2) + ' mm'
+                },
+                {
+                    name: 'Outer Rim Diameter (Ring)',
+                    key: 'd_rim',
+                    tooltip: 'Outer boundary dimension of internal ring housing rim',
+                    fmt: v => v ? v.toFixed(2) + ' mm' : '-'
+                }
             ];
 
             tbody.innerHTML = rows.map(r => `
                 <tr>
-                    <td>${r.name}</td>
+                    <td>
+                        <div class="term-header" data-tooltip="${r.tooltip}">
+                            <span>${r.name}</span>
+                            <span class="tooltip-icon">?</span>
+                        </div>
+                    </td>
                     <td class="val-sun">${r.fmt(geom.sun[r.key])}</td>
                     <td class="val-planet">${r.fmt(geom.planet[r.key])}</td>
                     <td class="val-ring">${r.fmt(geom.ring[r.key])}</td>
                 </tr>
             `).join('');
 
-            // Append Center Distance row
+            // Center Distance Summary Row
             tbody.innerHTML += `
-                <tr style="background: rgba(255,255,255,0.02)">
-                    <td><strong>Center Distance (a)</strong></td>
+                <tr style="background: var(--table-hover)">
+                    <td>
+                        <div class="term-header" data-tooltip="Distance between Sun center and Planet center (asp = m·(Zs+Zp)/2)">
+                            <strong>Center Distance (asp)</strong>
+                            <span class="tooltip-icon">?</span>
+                        </div>
+                    </td>
                     <td colspan="3" style="text-align:center; font-weight:bold; color:var(--accent-carrier)">
                         ${geom.centerDistance.toFixed(2)} mm
                     </td>
@@ -744,7 +892,7 @@
             `;
         }
 
-        // --- Pure SVG Rendering & Animation ---
+        // --- SVG Schematic Visualizer ---
         function renderSVG() {
             const svg = document.getElementById('gearSvg');
             const state = window.currentGearState;
@@ -752,19 +900,16 @@
 
             const { Ns, Np, Nr, K, geom, isValid } = state;
 
-            // Fit diagram within SVG viewport boundary (-180 to 180)
+            // Scaled Viewport (-180 to 180)
             const maxRadius = (geom.ring.d_rim || geom.ring.df) / 2;
-            const scale = maxRadius > 0 ? 160 / maxRadius : 1;
+            const scale = maxRadius > 0 ? 165 / maxRadius : 1;
 
-            const r_s_pitch = (geom.sun.d / 2) * scale;
             const r_s_tip = (geom.sun.da / 2) * scale;
             const r_s_root = (geom.sun.df / 2) * scale;
 
-            const r_p_pitch = (geom.planet.d / 2) * scale;
             const r_p_tip = (geom.planet.da / 2) * scale;
             const r_p_root = (geom.planet.df / 2) * scale;
 
-            const r_r_pitch = (geom.ring.d / 2) * scale;
             const r_r_tip = (geom.ring.da / 2) * scale;
             const r_r_root = (geom.ring.df / 2) * scale;
             const r_r_rim = ((geom.ring.d_rim || geom.ring.df + 10) / 2) * scale;
@@ -778,28 +923,24 @@
 
             let html = '';
 
-            // Validity Border
+            // Outer Feasibility Ring Boundary
             const statusColor = isValid ? 'var(--pass-color)' : 'var(--fail-color)';
-            html += `<circle cx="0" cy="0" r="175" fill="none" stroke="${statusColor}" stroke-width="1.5" stroke-dasharray="4,4"/>`;
+            html += `<circle cx="0" cy="0" r="176" fill="none" stroke="${statusColor}" stroke-width="1.5" stroke-dasharray="4,4"/>`;
 
-            // 1. Ring Gear (Internal teeth)
-            html += `<path d="M 0 0 M -${r_r_rim} 0 A ${r_r_rim} ${r_r_rim} 0 1 1 ${r_r_rim} 0 A ${r_r_rim} ${r_r_rim} 0 1 1 -${r_r_rim} 0" fill="#111827" stroke="#374151" stroke-width="2"/>`;
-            html += `<circle cx="0" cy="0" r="${r_r_root}" fill="#0d1117" stroke="var(--accent-ring)" stroke-width="1.5"/>`;
+            // 1. Ring Gear Structure
+            html += `<path d="M 0 0 M -${r_r_rim} 0 A ${r_r_rim} ${r_r_rim} 0 1 1 ${r_r_rim} 0 A ${r_r_rim} ${r_r_rim} 0 1 1 -${r_r_rim} 0" fill="var(--panel-bg)" stroke="var(--panel-border)" stroke-width="2"/>`;
+            html += `<circle cx="0" cy="0" r="${r_r_root}" fill="var(--input-bg)" stroke="var(--accent-ring)" stroke-width="1.5"/>`;
             html += drawTeethPattern(0, 0, Nr, r_r_root, r_r_tip, 0, 'var(--accent-ring)');
 
-            if (showReferenceCircles) {
-                html += `<circle cx="0" cy="0" r="${r_r_pitch}" fill="none" stroke="var(--accent-ring)" stroke-width="0.8" stroke-dasharray="2,2" opacity="0.6"/>`;
-            }
-
-            // 2. Carrier Spider Links
+            // 2. Carrier Spider Arm Structure
             for (let i = 0; i < K; i++) {
                 const angle = carrierRad + (i * 2 * Math.PI) / K;
                 const px = a_center * Math.cos(angle);
                 const py = a_center * Math.sin(angle);
-                html += `<line x1="0" y1="0" x2="${px}" y2="${py}" stroke="var(--accent-carrier)" stroke-width="2.5" opacity="0.8"/>`;
+                html += `<line x1="0" y1="0" x2="${px}" y2="${py}" stroke="var(--accent-carrier)" stroke-width="2.5" opacity="0.85"/>`;
                 html += `<circle cx="${px}" cy="${py}" r="3" fill="var(--accent-carrier)"/>`;
             }
-            html += `<circle cx="0" cy="0" r="4" fill="var(--accent-carrier)"/>`;
+            html += `<circle cx="0" cy="0" r="4.5" fill="var(--accent-carrier)"/>`;
 
             // 3. Planet Gears
             for (let i = 0; i < K; i++) {
@@ -808,37 +949,29 @@
                 const py = a_center * Math.sin(angle);
                 const pRot = angle + planetSelfRad;
 
-                html += `<circle cx="${px}" cy="${py}" r="${r_p_tip}" fill="#161b22" stroke="var(--accent-planet)" stroke-width="1.2"/>`;
+                html += `<circle cx="${px}" cy="${py}" r="${r_p_tip}" fill="var(--panel-bg)" stroke="var(--accent-planet)" stroke-width="1.2"/>`;
                 html += drawTeethPattern(px, py, Np, r_p_root, r_p_tip, pRot, 'var(--accent-planet)');
 
-                if (showReferenceCircles) {
-                    html += `<circle cx="${px}" cy="${py}" r="${r_p_pitch}" fill="none" stroke="var(--accent-planet)" stroke-width="0.8" stroke-dasharray="2,2" opacity="0.6"/>`;
-                }
-
-                // Reference orientation line
-                const rx = px + r_p_pitch * Math.cos(pRot);
-                const ry = py + r_p_pitch * Math.sin(pRot);
+                // Orientation notch
+                const rx = px + (r_p_root * 0.7) * Math.cos(pRot);
+                const ry = py + (r_p_root * 0.7) * Math.sin(pRot);
                 html += `<line x1="${px}" y1="${py}" x2="${rx}" y2="${ry}" stroke="var(--accent-planet)" stroke-width="1.5"/>`;
             }
 
             // 4. Sun Gear
-            html += `<circle cx="0" cy="0" r="${r_s_tip}" fill="#161b22" stroke="var(--accent-sun)" stroke-width="1.2"/>`;
+            html += `<circle cx="0" cy="0" r="${r_s_tip}" fill="var(--panel-bg)" stroke="var(--accent-sun)" stroke-width="1.2"/>`;
             html += drawTeethPattern(0, 0, Ns, r_s_root, r_s_tip, sunRad, 'var(--accent-sun)');
 
-            if (showReferenceCircles) {
-                html += `<circle cx="0" cy="0" r="${r_s_pitch}" fill="none" stroke="var(--accent-sun)" stroke-width="0.8" stroke-dasharray="2,2" opacity="0.6"/>`;
-            }
-
-            // Sun orientation line & shaft hole
-            const sx = r_s_pitch * Math.cos(sunRad);
-            const sy = r_s_pitch * Math.sin(sunRad);
+            // Sun orientation notch & center shaft
+            const sx = (r_s_root * 0.7) * Math.cos(sunRad);
+            const sy = (r_s_root * 0.7) * Math.sin(sunRad);
             html += `<line x1="0" y1="0" x2="${sx}" y2="${sy}" stroke="var(--accent-sun)" stroke-width="1.5"/>`;
-            html += `<circle cx="0" cy="0" r="${Math.max(4, r_s_root * 0.35)}" fill="#0d1117" stroke="var(--accent-sun)" stroke-width="1"/>`;
+            html += `<circle cx="0" cy="0" r="${Math.max(4, r_s_root * 0.35)}" fill="var(--input-bg)" stroke="var(--accent-sun)" stroke-width="1"/>`;
 
             svg.innerHTML = html;
         }
 
-        // Generate dynamic simplified trapezoidal gear tooth SVG path string
+        // Optimized teeth SVG path generation
         function drawTeethPattern(cx, cy, z, rRoot, rTip, startAngle, color) {
             let pathD = '';
             const step = (2 * Math.PI) / z;
@@ -862,11 +995,11 @@
                 pathD += `M ${x0.toFixed(1)} ${y0.toFixed(1)} L ${x1.toFixed(1)} ${y1.toFixed(1)} L ${x2.toFixed(1)} ${y2.toFixed(1)} L ${x3.toFixed(1)} ${y3.toFixed(1)} Z `;
             }
 
-            return `<path d="${pathD}" fill="${color}" opacity="0.7"/>`;
+            return `<path d="${pathD}" fill="${color}" opacity="0.65"/>`;
         }
 
         function animateLoop() {
-            animAngle += 0.5;
+            animAngle += 0.5 * animSpeedMultiplier;
             renderSVG();
             if (isAnimating) {
                 animFrameId = requestAnimationFrame(animateLoop);
@@ -877,7 +1010,6 @@
         window.addEventListener('DOMContentLoaded', () => {
             updateDisabledInputs();
             recalculate();
-            document.getElementById('btnLayers').classList.add('active');
         });
     </script>
 </body>
