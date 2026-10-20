@@ -1,0 +1,884 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Involute Planetary Gear Calculator</title>
+    <style>
+        /* Modern Compact Dark Engineering Theme */
+        :root {
+            --bg-color: #0d1117;
+            --panel-bg: #161b22;
+            --panel-border: #30363d;
+            --text-main: #c9d1d9;
+            --text-muted: #8b949e;
+            --accent-sun: #38adf8;
+            --accent-planet: #fbbf24;
+            --accent-ring: #34d399;
+            --accent-carrier: #a78bfa;
+            --pass-color: #2ea043;
+            --fail-color: #f85149;
+            --warn-color: #d29922;
+            --input-bg: #0d1117;
+            --font-mono: ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, Liberation Mono, monospace;
+            --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            font-family: var(--font-sans);
+            font-size: 12px;
+            line-height: 1.3;
+            padding: 10px;
+            min-height: 100vh;
+        }
+
+        /* Layout Grid */
+        .container {
+            max-w: 1280px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: 340px 1fr;
+            gap: 10px;
+        }
+
+        @media (max-width: 900px) {
+            .container { grid-template-columns: 1fr; }
+        }
+
+        .header {
+            grid-column: 1 / -1;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 6px 12px;
+            background: var(--panel-bg);
+            border: 1px solid var(--panel-border);
+            border-radius: 6px;
+        }
+
+        .header h1 {
+            font-size: 14px;
+            font-weight: 700;
+            color: #f0f6fc;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .header-sub {
+            font-size: 11px;
+            color: var(--text-muted);
+            font-family: var(--font-mono);
+        }
+
+        /* Panels & Cards */
+        .panel {
+            background: var(--panel-bg);
+            border: 1px solid var(--panel-border);
+            border-radius: 6px;
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .panel-title {
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-muted);
+            border-bottom: 1px solid var(--panel-border);
+            padding-bottom: 4px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        /* Form Controls */
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .mode-selector {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 4px;
+            background: var(--bg-color);
+            padding: 2px;
+            border-radius: 4px;
+            border: 1px solid var(--panel-border);
+        }
+
+        .mode-selector label {
+            text-align: center;
+            padding: 4px;
+            font-size: 10px;
+            cursor: pointer;
+            border-radius: 3px;
+            color: var(--text-muted);
+            transition: all 0.15s ease;
+        }
+
+        .mode-selector input { display: none; }
+        .mode-selector input:checked + span {
+            background: var(--panel-border);
+            color: #fff;
+            font-weight: 600;
+        }
+
+        .mode-selector span {
+            display: block;
+            border-radius: 2px;
+            padding: 2px 0;
+        }
+
+        .input-row {
+            display: grid;
+            grid-template-columns: 1fr 100px;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .input-label {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+
+        .color-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        input[type="number"], select {
+            background: var(--input-bg);
+            border: 1px solid var(--panel-border);
+            color: #f0f6fc;
+            padding: 4px 6px;
+            border-radius: 4px;
+            font-family: var(--font-mono);
+            font-size: 11px;
+            width: 100%;
+            text-align: right;
+        }
+
+        input[type="number"]:focus, select:focus {
+            outline: none;
+            border-color: var(--accent-sun);
+        }
+
+        input:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            background: #161b22;
+        }
+
+        /* Tooltip Component */
+        .tooltip-target {
+            cursor: help;
+            border-bottom: 1px dashed var(--text-muted);
+            position: relative;
+        }
+
+        .has-tooltip {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+        }
+
+        .tooltip-icon {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            line-height: 12px;
+            text-align: center;
+            border-radius: 50%;
+            background: var(--panel-border);
+            color: var(--text-muted);
+            font-size: 9px;
+            font-family: var(--font-mono);
+            margin-left: 3px;
+            cursor: help;
+        }
+
+        /* Pure CSS Tooltip popup */
+        [data-tooltip] { position: relative; }
+        [data-tooltip]:hover::before {
+            content: attr(data-tooltip);
+            position: absolute;
+            bottom: 125%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #24292e;
+            color: #f0f6fc;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-family: var(--font-sans);
+            white-space: max-content;
+            max-width: 200px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+            border: 1px solid var(--panel-border);
+            z-index: 100;
+            pointer-events: none;
+            font-weight: normal;
+            line-height: 1.2;
+        }
+
+        /* Diagnostics List */
+        .diag-list {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .diag-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 4px 6px;
+            background: var(--bg-color);
+            border: 1px solid var(--panel-border);
+            border-radius: 4px;
+            font-size: 11px;
+        }
+
+        .diag-status {
+            font-weight: 700;
+            font-family: var(--font-mono);
+            font-size: 10px;
+            padding: 1px 4px;
+            border-radius: 2px;
+        }
+
+        .status-pass { background: rgba(46, 160, 67, 0.15); color: var(--pass-color); }
+        .status-fail { background: rgba(248, 81, 73, 0.15); color: var(--fail-color); }
+        .status-warn { background: rgba(210, 153, 34, 0.15); color: var(--warn-color); }
+
+        /* Results Display Layout */
+        .right-col {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .viz-container {
+            position: relative;
+            background: #05070a;
+            border: 1px solid var(--panel-border);
+            border-radius: 6px;
+            height: 380px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+        }
+
+        svg#gearSvg {
+            width: 100%;
+            height: 100%;
+        }
+
+        .viz-controls {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            display: flex;
+            gap: 6px;
+            background: rgba(22, 27, 34, 0.85);
+            backdrop-filter: blur(4px);
+            padding: 4px;
+            border-radius: 4px;
+            border: 1px solid var(--panel-border);
+        }
+
+        .btn {
+            background: var(--panel-border);
+            color: #f0f6fc;
+            border: none;
+            padding: 3px 8px;
+            border-radius: 3px;
+            font-size: 10px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        .btn:hover { background: #444c56; }
+        .btn.active { background: var(--accent-sun); color: #000; }
+
+        /* Data Table */
+        .table-wrapper {
+            overflow-x: auto;
+        }
+
+        table.data-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-family: var(--font-mono);
+            font-size: 11px;
+            text-align: right;
+        }
+
+        table.data-table th, table.data-table td {
+            padding: 5px 8px;
+            border-bottom: 1px solid var(--panel-border);
+        }
+
+        table.data-table th {
+            text-align: right;
+            color: var(--text-muted);
+            font-weight: 600;
+            font-family: var(--font-sans);
+            font-size: 10px;
+            text-transform: uppercase;
+            background: var(--bg-color);
+        }
+
+        table.data-table th:first-child, table.data-table td:first-child {
+            text-align: left;
+            font-family: var(--font-sans);
+        }
+
+        table.data-table tr:hover {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .val-sun { color: var(--accent-sun); }
+        .val-planet { color: var(--accent-planet); }
+        .val-ring { color: var(--accent-ring); }
+
+        .summary-badge {
+            display: inline-block;
+            padding: 2px 6px;
+            border-radius: 10px;
+            font-size: 10px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        
+        <!-- Header -->
+        <div class="header">
+            <h1>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent-sun)"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                Involute Planetary Gear System
+            </h1>
+            <span class="header-sub">ISO/AGMA Spur Synthesizer</span>
+        </div>
+
+        <!-- Left Column: Input Configuration & Feasibility -->
+        <div class="panel">
+            
+            <div class="panel-title">
+                Synthesis Parameters
+                <span class="has-tooltip" data-tooltip="Select 2 known tooth counts to calculate the 3rd">
+                    <span class="tooltip-icon">?</span>
+                </span>
+            </div>
+
+            <!-- Solve Target Selector -->
+            <div class="control-group">
+                <div class="mode-selector">
+                    <label>
+                        <input type="radio" name="solveMode" value="ring" checked>
+                        <span>Calc Ring</span>
+                    </label>
+                    <label>
+                        <input type="radio" name="solveMode" value="planet">
+                        <span>Calc Planet</span>
+                    </label>
+                    <label>
+                        <input type="radio" name="solveMode" value="sun">
+                        <span>Calc Sun</span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Teeth Inputs -->
+            <div class="control-group">
+                <div class="input-row">
+                    <label class="input-label" for="inp_Ns">
+                        <span class="color-dot" style="background:var(--accent-sun)"></span>
+                        Sun Teeth (Ns)
+                    </label>
+                    <input type="number" id="inp_Ns" value="18" min="8" max="500">
+                </div>
+
+                <div class="input-row">
+                    <label class="input-label" for="inp_Np">
+                        <span class="color-dot" style="background:var(--accent-planet)"></span>
+                        Planet Teeth (Np)
+                    </label>
+                    <input type="number" id="inp_Np" value="18" min="8" max="500">
+                </div>
+
+                <div class="input-row">
+                    <label class="input-label" for="inp_Nr">
+                        <span class="color-dot" style="background:var(--accent-ring)"></span>
+                        Ring Teeth (Nr)
+                    </label>
+                    <input type="number" id="inp_Nr" value="54" min="16" max="1000" disabled>
+                </div>
+            </div>
+
+            <div class="panel-title" style="margin-top:4px;">
+                Module & Configuration
+            </div>
+
+            <div class="control-group">
+                <div class="input-row">
+                    <label class="input-label has-tooltip" data-tooltip="Number of planet gears (K)">
+                        Planets (K)
+                        <span class="tooltip-icon">?</span>
+                    </label>
+                    <select id="inp_K">
+                        <option value="3" selected>3</option>
+                        <option value="4">4</option>
+                        <option value="5">5</option>
+                        <option value="6">6</option>
+                        <option value="7">7</option>
+                        <option value="8">8</option>
+                        <option value="9">9</option>
+                    </select>
+                </div>
+
+                <div class="input-row">
+                    <label class="input-label has-tooltip" data-tooltip="Gear module m in mm (Pitch diameter / Teeth)">
+                        Module (m) [mm]
+                        <span class="tooltip-icon">?</span>
+                    </label>
+                    <input type="number" id="inp_m" value="2.0" step="0.1" min="0.1">
+                </div>
+
+                <div class="input-row">
+                    <label class="input-label has-tooltip" data-tooltip="Standard pressure angle alpha (usually 20 deg)">
+                        Pressure Angle (α)
+                        <span class="tooltip-icon">?</span>
+                    </label>
+                    <input type="number" id="inp_alpha" value="20" step="0.5" min="5" max="35">
+                </div>
+            </div>
+
+            <!-- Diagnostics Check list -->
+            <div class="panel-title" style="margin-top:4px;">
+                System Validity Checks
+                <span id="overallBadge" class="summary-badge status-pass">VALID</span>
+            </div>
+
+            <div class="diag-list" id="diagContainer">
+                <!-- Dynamic feasibility items inserted here -->
+            </div>
+
+        </div>
+
+        <!-- Right Column: Canvas Diagram & Comprehensive Geometry -->
+        <div class="right-col">
+            
+            <!-- SVG Gear Schematic -->
+            <div class="viz-container">
+                <div class="viz-controls">
+                    <button class="btn" id="btnAnim">Animate</button>
+                    <button class="btn" id="btnLayers">Circles</button>
+                </div>
+                <svg id="gearSvg" viewBox="-200 -200 400 400"></svg>
+            </div>
+
+            <!-- Gear Geometry Dimensions Table -->
+            <div class="panel">
+                <div class="panel-title">
+                    Gear Geometry Breakdown
+                    <span class="has-tooltip" data-tooltip="All dimensions in mm based on standard involute gear proportions">
+                        <span class="tooltip-icon">?</span>
+                    </span>
+                </div>
+
+                <div class="table-wrapper">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Parameter</th>
+                                <th>Sun (Ns)</th>
+                                <th>Planet (Np)</th>
+                                <th>Ring (Nr)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="geomTableBody">
+                            <!-- Dynamic Table Rows -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </div>
+
+    </div>
+
+    <script>
+        // --- Core Application State ---
+        let isAnimating = false;
+        let animFrameId = null;
+        let animAngle = 0;
+        let showReferenceCircles = true;
+
+        const inputs = {
+            solveMode: document.getElementsByName('solveMode'),
+            Ns: document.getElementById('inp_Ns'),
+            Np: document.getElementById('inp_Np'),
+            Nr: document.getElementById('inp_Nr'),
+            K: document.getElementById('inp_K'),
+            m: document.getElementById('inp_m'),
+            alpha: document.getElementById('inp_alpha')
+        };
+
+        // --- Event Listeners Setup ---
+        Array.from(inputs.solveMode).forEach(radio => {
+            radio.addEventListener('change', () => {
+                updateDisabledInputs();
+                recalculate();
+            });
+        });
+
+        [inputs.Ns, inputs.Np, inputs.Nr, inputs.K, inputs.m, inputs.alpha].forEach(elem => {
+            elem.addEventListener('input', recalculate);
+        });
+
+        document.getElementById('btnAnim').addEventListener('click', function() {
+            isAnimating = !isAnimating;
+            this.classList.toggle('active', isAnimating);
+            this.innerText = isAnimating ? 'Pause' : 'Animate';
+            if (isAnimating) animateLoop();
+            else cancelAnimationFrame(animFrameId);
+        });
+
+        document.getElementById('btnLayers').addEventListener('click', function() {
+            showReferenceCircles = !showReferenceCircles;
+            this.classList.toggle('active', showReferenceCircles);
+            renderSVG();
+        });
+
+        function updateDisabledInputs() {
+            const mode = getSelectedSolveMode();
+            inputs.Ns.disabled = (mode === 'sun');
+            inputs.Np.disabled = (mode === 'planet');
+            inputs.Nr.disabled = (mode === 'ring');
+        }
+
+        function getSelectedSolveMode() {
+            for (let r of inputs.solveMode) {
+                if (r.checked) return r.value;
+            }
+            return 'ring';
+        }
+
+        // --- Core Calculation & Synthesis Logic ---
+        function recalculate() {
+            const mode = getSelectedSolveMode();
+            let Ns = parseInt(inputs.Ns.value) || 0;
+            let Np = parseInt(inputs.Np.value) || 0;
+            let Nr = parseInt(inputs.Nr.value) || 0;
+            const K = parseInt(inputs.K.value) || 3;
+            const m = parseFloat(inputs.m.value) || 1.0;
+            const alphaDeg = parseFloat(inputs.alpha.value) || 20.0;
+            const alphaRad = (alphaDeg * Math.PI) / 180.0;
+
+            // Synthesis equation: Nr = Ns + 2*Np
+            if (mode === 'ring') {
+                Nr = Ns + 2 * Np;
+                inputs.Nr.value = Nr;
+            } else if (mode === 'planet') {
+                Np = (Nr - Ns) / 2;
+                inputs.Np.value = Number.isInteger(Np) ? Np : Np.toFixed(1);
+            } else if (mode === 'sun') {
+                Ns = Nr - 2 * Np;
+                inputs.Ns.value = Ns;
+            }
+
+            // Perform Validity Checks
+            const checks = runValidityChecks(Ns, Np, Nr, K, alphaDeg);
+            updateValidityUI(checks);
+
+            // Calculate Gear Geometry
+            const geom = computeGeometry(Ns, Np, Nr, m, alphaRad);
+            renderGeometryTable(geom);
+
+            // Store state for SVG renderer
+            window.currentGearState = { Ns, Np, Nr, K, m, alphaRad, geom, isValid: checks.allValid };
+            renderSVG();
+        }
+
+        function runValidityChecks(Ns, Np, Nr, K, alphaDeg) {
+            const checks = [];
+
+            // 1. Coaxiality Condition (Nr = Ns + 2*Np)
+            const isCoaxial = (Nr === Ns + 2 * Np) && (Ns > 0) && (Np > 0) && (Nr > 0);
+            checks.push({
+                name: "Coaxiality (Nr = Ns + 2·Np)",
+                passed: isCoaxial,
+                tooltip: "Ring gear teeth must equal Sun teeth plus twice Planet teeth"
+            });
+
+            // 2. Assembly / Indexing Condition ((Ns + Nr) / K must be an integer)
+            const assemblySum = Ns + Nr;
+            const isAssemblyValid = Number.isInteger(assemblySum / K);
+            checks.push({
+                name: `Assembly ((Ns+Nr)/K = ${(assemblySum/K).toFixed(2)})`,
+                passed: isAssemblyValid,
+                tooltip: "(Ns + Nr) / Number_of_Planets must be a whole integer for symmetric spacing"
+            });
+
+            // 3. Adjacent Planet Non-Interference Check
+            // Tip-to-tip clearance: Sin(pi/K) > (Np + 2) / (Ns + Np)
+            const lhs = Math.sin(Math.PI / K);
+            const rhs = (Np + 2) / (Ns + Np);
+            const noInterference = lhs > rhs;
+            checks.push({
+                name: "Planet Tip Non-Interference",
+                passed: noInterference,
+                tooltip: "Verifies adjacent planets do not physically collide tip-to-tip"
+            });
+
+            // 4. Undercutting Check (Min teeth without shift ~ 17 for 20 deg)
+            const minTeethTheoretical = 2 / Math.pow(Math.sin((alphaDeg * Math.PI) / 180), 2);
+            const minTeeth = Math.ceil(minTeethTheoretical);
+            const noUndercut = (Ns >= minTeeth) && (Np >= minTeeth);
+            checks.push({
+                name: `Undercut Avoidance (N ≥ ${minTeeth})`,
+                passed: noUndercut,
+                warningOnly: true,
+                tooltip: `Gears with fewer than ~${minTeeth} teeth suffer involute undercutting unless profile shifted`
+            });
+
+            const allValid = checks.every(c => c.passed || c.warningOnly);
+            return { checks, allValid };
+        }
+
+        function updateValidityUI({ checks, allValid }) {
+            const container = document.getElementById('diagContainer');
+            const badge = document.getElementById('overallBadge');
+
+            badge.className = `summary-badge ${allValid ? 'status-pass' : 'status-fail'}`;
+            badge.innerText = allValid ? 'VALID' : 'INVALID';
+
+            container.innerHTML = checks.map(c => {
+                let statusClass = c.passed ? 'status-pass' : (c.warningOnly ? 'status-warn' : 'status-fail');
+                let statusText = c.passed ? 'PASS' : (c.warningOnly ? 'WARN' : 'FAIL');
+
+                return `
+                    <div class="diag-item has-tooltip" data-tooltip="${c.tooltip}">
+                        <span>${c.name}</span>
+                        <span class="diag-status ${statusClass}">${statusText}</span>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function computeGeometry(Ns, Np, Nr, m, alphaRad) {
+            const calcGear = (N, isInternal = false) => {
+                const d = m * N; // Pitch Diameter
+                const db = d * Math.cos(alphaRad); // Base Diameter
+                
+                let da, df, d_rim;
+                if (!isInternal) {
+                    da = m * (N + 2);     // Tip/Outer Diameter
+                    df = m * (N - 2.5);   // Root Diameter
+                } else {
+                    da = m * (N - 2);     // Inside Tip Diameter for internal ring
+                    df = m * (N + 2.5);   // Root Diameter for internal ring
+                    d_rim = m * (N + 6);  // Estimated Outer Rim Diameter
+                }
+
+                return { N, d, db, da, df, d_rim };
+            };
+
+            return {
+                sun: calcGear(Ns, false),
+                planet: calcGear(Np, false),
+                ring: calcGear(Nr, true),
+                centerDistance: (m * (Ns + Np)) / 2
+            };
+        }
+
+        function renderGeometryTable(geom) {
+            const tbody = document.getElementById('geomTableBody');
+
+            const rows = [
+                { name: 'Number of Teeth (N)', key: 'N', fmt: v => v },
+                { name: 'Pitch Diameter (d)', key: 'd', fmt: v => v.toFixed(2) + ' mm' },
+                { name: 'Base Diameter (db)', key: 'db', fmt: v => v.toFixed(2) + ' mm' },
+                { name: 'Tip / Inside Diameter (da)', key: 'da', fmt: v => v.toFixed(2) + ' mm' },
+                { name: 'Root Diameter (df)', key: 'df', fmt: v => v.toFixed(2) + ' mm' },
+                { name: 'Outer Rim Diameter (Ring)', key: 'd_rim', fmt: v => v ? v.toFixed(2) + ' mm' : '-' }
+            ];
+
+            tbody.innerHTML = rows.map(r => `
+                <tr>
+                    <td>${r.name}</td>
+                    <td class="val-sun">${r.fmt(geom.sun[r.key])}</td>
+                    <td class="val-planet">${r.fmt(geom.planet[r.key])}</td>
+                    <td class="val-ring">${r.fmt(geom.ring[r.key])}</td>
+                </tr>
+            `).join('');
+
+            // Append Center Distance row
+            tbody.innerHTML += `
+                <tr style="background: rgba(255,255,255,0.02)">
+                    <td><strong>Center Distance (a)</strong></td>
+                    <td colspan="3" style="text-align:center; font-weight:bold; color:var(--accent-carrier)">
+                        ${geom.centerDistance.toFixed(2)} mm
+                    </td>
+                </tr>
+            `;
+        }
+
+        // --- Pure SVG Rendering & Animation ---
+        function renderSVG() {
+            const svg = document.getElementById('gearSvg');
+            const state = window.currentGearState;
+            if (!state || !state.geom) return;
+
+            const { Ns, Np, Nr, K, geom, isValid } = state;
+
+            // Fit diagram within SVG viewport boundary (-180 to 180)
+            const maxRadius = (geom.ring.d_rim || geom.ring.df) / 2;
+            const scale = maxRadius > 0 ? 160 / maxRadius : 1;
+
+            const r_s_pitch = (geom.sun.d / 2) * scale;
+            const r_s_tip = (geom.sun.da / 2) * scale;
+            const r_s_root = (geom.sun.df / 2) * scale;
+
+            const r_p_pitch = (geom.planet.d / 2) * scale;
+            const r_p_tip = (geom.planet.da / 2) * scale;
+            const r_p_root = (geom.planet.df / 2) * scale;
+
+            const r_r_pitch = (geom.ring.d / 2) * scale;
+            const r_r_tip = (geom.ring.da / 2) * scale;
+            const r_r_root = (geom.ring.df / 2) * scale;
+            const r_r_rim = ((geom.ring.d_rim || geom.ring.df + 10) / 2) * scale;
+
+            const a_center = geom.centerDistance * scale;
+
+            // Kinematic Angles
+            const carrierRad = (animAngle * Math.PI) / 180;
+            const sunRad = carrierRad * (1 + Nr / Ns);
+            const planetSelfRad = - carrierRad * (Nr / Np);
+
+            let html = '';
+
+            // Validity Border
+            const statusColor = isValid ? 'var(--pass-color)' : 'var(--fail-color)';
+            html += `<circle cx="0" cy="0" r="175" fill="none" stroke="${statusColor}" stroke-width="1.5" stroke-dasharray="4,4"/>`;
+
+            // 1. Ring Gear (Internal teeth)
+            html += `<path d="M 0 0 M -${r_r_rim} 0 A ${r_r_rim} ${r_r_rim} 0 1 1 ${r_r_rim} 0 A ${r_r_rim} ${r_r_rim} 0 1 1 -${r_r_rim} 0" fill="#111827" stroke="#374151" stroke-width="2"/>`;
+            html += `<circle cx="0" cy="0" r="${r_r_root}" fill="#0d1117" stroke="var(--accent-ring)" stroke-width="1.5"/>`;
+            html += drawTeethPattern(0, 0, Nr, r_r_root, r_r_tip, 0, 'var(--accent-ring)');
+
+            if (showReferenceCircles) {
+                html += `<circle cx="0" cy="0" r="${r_r_pitch}" fill="none" stroke="var(--accent-ring)" stroke-width="0.8" stroke-dasharray="2,2" opacity="0.6"/>`;
+            }
+
+            // 2. Carrier Spider Links
+            for (let i = 0; i < K; i++) {
+                const angle = carrierRad + (i * 2 * Math.PI) / K;
+                const px = a_center * Math.cos(angle);
+                const py = a_center * Math.sin(angle);
+                html += `<line x1="0" y1="0" x2="${px}" y2="${py}" stroke="var(--accent-carrier)" stroke-width="2.5" opacity="0.8"/>`;
+                html += `<circle cx="${px}" cy="${py}" r="3" fill="var(--accent-carrier)"/>`;
+            }
+            html += `<circle cx="0" cy="0" r="4" fill="var(--accent-carrier)"/>`;
+
+            // 3. Planet Gears
+            for (let i = 0; i < K; i++) {
+                const angle = carrierRad + (i * 2 * Math.PI) / K;
+                const px = a_center * Math.cos(angle);
+                const py = a_center * Math.sin(angle);
+                const pRot = angle + planetSelfRad;
+
+                html += `<circle cx="${px}" cy="${py}" r="${r_p_tip}" fill="#161b22" stroke="var(--accent-planet)" stroke-width="1.2"/>`;
+                html += drawTeethPattern(px, py, Np, r_p_root, r_p_tip, pRot, 'var(--accent-planet)');
+
+                if (showReferenceCircles) {
+                    html += `<circle cx="${px}" cy="${py}" r="${r_p_pitch}" fill="none" stroke="var(--accent-planet)" stroke-width="0.8" stroke-dasharray="2,2" opacity="0.6"/>`;
+                }
+
+                // Reference orientation line
+                const rx = px + r_p_pitch * Math.cos(pRot);
+                const ry = py + r_p_pitch * Math.sin(pRot);
+                html += `<line x1="${px}" y1="${py}" x2="${rx}" y2="${ry}" stroke="var(--accent-planet)" stroke-width="1.5"/>`;
+            }
+
+            // 4. Sun Gear
+            html += `<circle cx="0" cy="0" r="${r_s_tip}" fill="#161b22" stroke="var(--accent-sun)" stroke-width="1.2"/>`;
+            html += drawTeethPattern(0, 0, Ns, r_s_root, r_s_tip, sunRad, 'var(--accent-sun)');
+
+            if (showReferenceCircles) {
+                html += `<circle cx="0" cy="0" r="${r_s_pitch}" fill="none" stroke="var(--accent-sun)" stroke-width="0.8" stroke-dasharray="2,2" opacity="0.6"/>`;
+            }
+
+            // Sun orientation line & shaft hole
+            const sx = r_s_pitch * Math.cos(sunRad);
+            const sy = r_s_pitch * Math.sin(sunRad);
+            html += `<line x1="0" y1="0" x2="${sx}" y2="${sy}" stroke="var(--accent-sun)" stroke-width="1.5"/>`;
+            html += `<circle cx="0" cy="0" r="${Math.max(4, r_s_root * 0.35)}" fill="#0d1117" stroke="var(--accent-sun)" stroke-width="1"/>`;
+
+            svg.innerHTML = html;
+        }
+
+        // Generate dynamic simplified trapezoidal gear tooth SVG path string
+        function drawTeethPattern(cx, cy, z, rRoot, rTip, startAngle, color) {
+            let pathD = '';
+            const step = (2 * Math.PI) / z;
+            const toothAngle = step * 0.45;
+
+            for (let i = 0; i < z; i++) {
+                const a0 = startAngle + i * step;
+                const a1 = a0 + toothAngle * 0.25;
+                const a2 = a0 + toothAngle * 0.75;
+                const a3 = a0 + toothAngle;
+
+                const x0 = cx + rRoot * Math.cos(a0);
+                const y0 = cy + rRoot * Math.sin(a0);
+                const x1 = cx + rTip * Math.cos(a1);
+                const y1 = cy + rTip * Math.sin(a1);
+                const x2 = cx + rTip * Math.cos(a2);
+                const y2 = cy + rTip * Math.sin(a2);
+                const x3 = cx + rRoot * Math.cos(a3);
+                const y3 = cy + rRoot * Math.sin(a3);
+
+                pathD += `M ${x0.toFixed(1)} ${y0.toFixed(1)} L ${x1.toFixed(1)} ${y1.toFixed(1)} L ${x2.toFixed(1)} ${y2.toFixed(1)} L ${x3.toFixed(1)} ${y3.toFixed(1)} Z `;
+            }
+
+            return `<path d="${pathD}" fill="${color}" opacity="0.7"/>`;
+        }
+
+        function animateLoop() {
+            animAngle += 0.5;
+            renderSVG();
+            if (isAnimating) {
+                animFrameId = requestAnimationFrame(animateLoop);
+            }
+        }
+
+        // Initialize Application
+        window.addEventListener('DOMContentLoaded', () => {
+            updateDisabledInputs();
+            recalculate();
+            document.getElementById('btnLayers').classList.add('active');
+        });
+    </script>
+</body>
+</html>
