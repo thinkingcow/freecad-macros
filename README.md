@@ -48,6 +48,8 @@ modifications I've made are changes to the UI messages.
               of linked properties, allowing ongoing changes to linked properties
 - **simpleEllipse** create a companion (e.g. similar) ellipse to the elliptical
              gear created with "ellipse"
+- ** ovalGear** Create an oval gear suitable for 2 to rotate around their centers,
+	     while meshing properly
 
 ## Realated resources
 - **spur_gear_calculator.html**  A standalone html page that calculates the sizes of
