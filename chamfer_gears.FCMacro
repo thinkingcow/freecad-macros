@@ -115,147 +115,144 @@ class GearSelectionDialog(QtWidgets.QDialog):
             return "Bottom"
 
 
-def process_gear(doc, gear_obj, chamfer_size, chamfer_side):
-    """Applies chamfer intersection logic to a single gear object taking global placement into account."""
-    is_ring_gear = "Ring" in gear_obj.Label
+class ChamferedGearFeature:
+    """Parametric FeaturePython class for chamfered gears that dynamically recomputes on changes."""
 
-    # Derive corresponding VarSet label
-    varset_label = (
-        gear_obj.Label[:-5] + "_values"
-        if gear_obj.Label.endswith("_Body")
-        else gear_obj.Label + "_values"
-    )
+    def __init__(self, obj):
+        obj.Proxy = self
+        obj.addProperty("App::PropertyLink", "SourceGear", "Parameters", "Source gear object")
+        obj.addProperty("App::PropertyFloat", "ChamferSize", "Parameters", "Chamfer size in mm")
+        obj.addProperty("App::PropertyEnumeration", "ChamferSide", "Parameters", "Chamfer side")
+        obj.ChamferSide = ["Both", "Top", "Bottom"]
 
-    # Search document for matching VarSet
-    varset_obj = None
-    for obj in doc.Objects:
-        if obj.Label == varset_label or obj.Name == varset_label:
-            varset_obj = obj
-            break
+    def execute(self, obj):
+        gear_obj = obj.SourceGear
+        if not gear_obj or not hasattr(gear_obj, "Shape"):
+            return
 
-    if not varset_obj:
-        return False, f"Missing VarSet '{varset_label}' for gear '{gear_obj.Label}'"
+        chamfer_size = float(obj.ChamferSize)
+        side_val = obj.ChamferSide
+        chamfer_side = side_val if isinstance(side_val, str) else ["Both", "Top", "Bottom"][side_val]
 
-    height_keys = ["Height", "height"]
-    outer_dia_keys = ["OuterDiameter", "outerDiameter", "Outer_Diameter", "outer_diameter"]
-    inner_dia_keys = ["InnerDiameter", "innerDiameter", "Inner_Diameter", "inner_diameter"]
+        doc = obj.Document
+        is_ring_gear = "Ring" in gear_obj.Label
 
-    # Fetch dimensions
-    height = get_property_value(varset_obj, height_keys) or get_property_value(
-        gear_obj, height_keys
-    )
-    outer_diameter = get_property_value(
-        varset_obj, outer_dia_keys
-    ) or get_property_value(gear_obj, outer_dia_keys)
-
-    inner_diameter = None
-    if is_ring_gear:
-        inner_diameter = get_property_value(
-            varset_obj, inner_dia_keys
-        ) or get_property_value(gear_obj, inner_dia_keys)
-
-    if height is None or outer_diameter is None or (is_ring_gear and inner_diameter is None):
-        return False, f"Missing required dimension properties in '{varset_label}'"
-
-    # Validate chamfer size limits
-    max_height_limit = height - 0.01 if chamfer_side != "Both" else height / 2.0
-    if is_ring_gear:
-        wall_thickness = (outer_diameter - inner_diameter) / 2.0
-        max_chamfer = min(max_height_limit, wall_thickness - 0.01, inner_diameter / 2.0 - 0.01)
-    else:
-        max_chamfer = min(max_height_limit, outer_diameter / 2.0 - 0.01)
-
-    if chamfer_size > max_chamfer:
-        return (
-            False,
-            f"Chamfer size ({chamfer_size} mm) exceeds maximum allowable ({max_chamfer:.2f} mm) for '{gear_obj.Label}'",
+        # Derive corresponding VarSet label
+        varset_label = (
+            gear_obj.Label[:-5] + "_values"
+            if gear_obj.Label.endswith("_Body")
+            else gear_obj.Label + "_values"
         )
 
-    # Fetch gear placement
-    placement = (
-        gear_obj.getGlobalPlacement()
-        if hasattr(gear_obj, "getGlobalPlacement")
-        else gear_obj.Placement
-    )
+        varset_obj = None
+        for o in doc.Objects:
+            if o.Label == varset_label or o.Name == varset_label:
+                varset_obj = o
+                break
 
-    # Calculate global coordinates of local Z=0 (bottom) and Z=height (top) face centers
-    global_local_bottom = placement.multVec(App.Vector(0, 0, 0))
-    global_local_top = placement.multVec(App.Vector(0, 0, height))
+        height_keys = ["Height", "height"]
+        outer_dia_keys = ["OuterDiameter", "outerDiameter", "Outer_Diameter", "outer_diameter"]
+        inner_dia_keys = ["InnerDiameter", "innerDiameter", "Inner_Diameter", "inner_diameter"]
 
-    # Build base cutting shape in local space
-    if is_ring_gear:
-        outer_r = outer_diameter / 2.0
-        inner_r = inner_diameter / 2.0
+        height = get_property_value(varset_obj, height_keys) or get_property_value(gear_obj, height_keys)
+        outer_diameter = get_property_value(varset_obj, outer_dia_keys) or get_property_value(gear_obj, outer_dia_keys)
 
-        outer_cyl = Part.makeCylinder(outer_r, height)
-        inner_cyl = Part.makeCylinder(inner_r, height)
-        tube_shape = outer_cyl.cut(inner_cyl)
+        inner_diameter = None
+        if is_ring_gear:
+            inner_diameter = get_property_value(varset_obj, inner_dia_keys) or get_property_value(gear_obj, inner_dia_keys)
 
-        all_inner_edges = [
-            e
-            for e in tube_shape.Edges
-            if isinstance(e.Curve, Part.Circle)
-            and math.isclose(e.Curve.Radius, inner_r, abs_tol=1e-3)
-        ]
+        if height is None or outer_diameter is None or (is_ring_gear and inner_diameter is None):
+            App.Console.PrintWarning(f"ChamferedGear: Missing required dimension properties for '{gear_obj.Label}'\n")
+            return
 
-        local_top_edges = [
-            e for e in all_inner_edges if math.isclose(e.Curve.Center.z, height, abs_tol=1e-3)
-        ]
-        local_bottom_edges = [
-            e for e in all_inner_edges if math.isclose(e.Curve.Center.z, 0.0, abs_tol=1e-3)
-        ]
-    else:
-        radius = outer_diameter / 2.0
-        cyl_shape = Part.makeCylinder(radius, height)
+        # Fetch gear placement
+        placement = (
+            gear_obj.getGlobalPlacement()
+            if hasattr(gear_obj, "getGlobalPlacement")
+            else gear_obj.Placement
+        )
 
-        all_edges = [e for e in cyl_shape.Edges if isinstance(e.Curve, Part.Circle)]
+        global_local_bottom = placement.multVec(App.Vector(0, 0, 0))
+        global_local_top = placement.multVec(App.Vector(0, 0, height))
 
-        local_top_edges = [
-            e for e in all_edges if math.isclose(e.Curve.Center.z, height, abs_tol=1e-3)
-        ]
-        local_bottom_edges = [
-            e for e in all_edges if math.isclose(e.Curve.Center.z, 0.0, abs_tol=1e-3)
-        ]
+        if is_ring_gear:
+            outer_r = outer_diameter / 2.0
+            inner_r = inner_diameter / 2.0
+            outer_cyl = Part.makeCylinder(outer_r, height)
+            inner_cyl = Part.makeCylinder(inner_r, height)
+            tube_shape = outer_cyl.cut(inner_cyl)
 
-    # Map local edge groups to physical world Top and Bottom based on global Z position
-    if global_local_top.z >= global_local_bottom.z:
-        world_top_edges = local_top_edges
-        world_bottom_edges = local_bottom_edges
-    else:
-        # Gear is inverted (e.g., rotated 180° around X or Y axis)
-        world_top_edges = local_bottom_edges
-        world_bottom_edges = local_top_edges
+            all_inner_edges = [
+                e for e in tube_shape.Edges
+                if isinstance(e.Curve, Part.Circle) and math.isclose(e.Curve.Radius, inner_r, abs_tol=1e-3)
+            ]
+            local_top_edges = [e for e in all_inner_edges if math.isclose(e.Curve.Center.z, height, abs_tol=1e-3)]
+            local_bottom_edges = [e for e in all_inner_edges if math.isclose(e.Curve.Center.z, 0.0, abs_tol=1e-3)]
+        else:
+            radius = outer_diameter / 2.0
+            cyl_shape = Part.makeCylinder(radius, height)
+            all_edges = [e for e in cyl_shape.Edges if isinstance(e.Curve, Part.Circle)]
+            local_top_edges = [e for e in all_edges if math.isclose(e.Curve.Center.z, height, abs_tol=1e-3)]
+            local_bottom_edges = [e for e in all_edges if math.isclose(e.Curve.Center.z, 0.0, abs_tol=1e-3)]
 
-    # Select target edges matching the user option
-    if chamfer_side == "Top":
-        target_edges = world_top_edges
-    elif chamfer_side == "Bottom":
-        target_edges = world_bottom_edges
-    else:  # "Both"
-        target_edges = world_top_edges + world_bottom_edges
+        if global_local_top.z >= global_local_bottom.z:
+            world_top_edges = local_top_edges
+            world_bottom_edges = local_bottom_edges
+        else:
+            world_top_edges = local_bottom_edges
+            world_bottom_edges = local_top_edges
 
-    if not target_edges:
-        return False, f"Failed identifying {chamfer_side.lower()} edge(s) on '{gear_obj.Label}'"
+        if chamfer_side == "Top":
+            target_edges = world_top_edges
+        elif chamfer_side == "Bottom":
+            target_edges = world_bottom_edges
+        else:
+            target_edges = world_top_edges + world_bottom_edges
 
-    # Apply chamfer to local cutter shape
-    if is_ring_gear:
-        cutter_shape = tube_shape.makeChamfer(chamfer_size, target_edges)
-    else:
-        cutter_shape = cyl_shape.makeChamfer(chamfer_size, target_edges)
+        if not target_edges:
+            App.Console.PrintWarning(f"ChamferedGear: Failed identifying target edges on '{gear_obj.Label}'\n")
+            return
 
-    # Align cutter shape with gear's final global placement
-    cutter_shape.Placement = placement
+        if is_ring_gear:
+            cutter_shape = tube_shape.makeChamfer(chamfer_size, target_edges)
+        else:
+            cutter_shape = cyl_shape.makeChamfer(chamfer_size, target_edges)
 
-    # Perform boolean intersection
-    intersected_shape = gear_obj.Shape.common(cutter_shape)
+        cutter_shape.Placement = placement
+        obj.Shape = gear_obj.Shape.common(cutter_shape)
 
-    # Create new feature object
+
+class _ViewProviderChamferedGear:
+    """View provider for the parametric chamfered gear feature."""
+
+    def __init__(self, vobj):
+        vobj.Proxy = self
+
+    def getIcon(self):
+        return """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+              <path d="M10 10 h44 v44 h-44 z" fill="#336699" stroke="#ffffff" stroke-width="2"/>
+            </svg>
+            """
+
+
+def process_gear(doc, gear_obj, chamfer_size, chamfer_side):
+    """Creates a parametric ChamferedGearFeature linked to the source gear."""
     res_name = f"{gear_obj.Name}_chamfered"
     res_label = f"{gear_obj.Label}_chamfered"
 
-    res_obj = doc.addObject("Part::Feature", res_name)
+    # Create parametric FeaturePython object
+    res_obj = doc.addObject("Part::FeaturePython", res_name)
     res_obj.Label = res_label
-    res_obj.Shape = intersected_shape
+    ChamferedGearFeature(res_obj)
+
+    res_obj.SourceGear = gear_obj
+    res_obj.ChamferSize = chamfer_size
+    res_obj.ChamferSide = chamfer_side
+
+    if App.GuiUp:
+        _ViewProviderChamferedGear(res_obj.ViewObject)
 
     # Hide original object
     if hasattr(gear_obj, "ViewObject") and gear_obj.ViewObject:
@@ -270,7 +267,6 @@ def main():
         QtWidgets.QMessageBox.warning(None, "Macro Error", "No active document found.")
         return
 
-    # Identify all gear objects containing "Gear" in their label and ending with "_Body"
     gear_objects = [
         obj for obj in doc.Objects if "Gear" in obj.Label and obj.Label.endswith("_Body")
     ]
@@ -283,7 +279,6 @@ def main():
         )
         return
 
-    # Prompt user with dialog
     dialog = GearSelectionDialog(gear_objects)
     if dialog.exec_() != QtWidgets.QDialog.Accepted:
         return
@@ -295,7 +290,6 @@ def main():
     if not selected_gears:
         return
 
-    # Process all selected gears
     errors = []
     processed_count = 0
 
@@ -308,7 +302,6 @@ def main():
 
     doc.recompute()
 
-    # Report results
     if errors:
         msg = f"Processed {processed_count} gear(s).\n\nErrors encountered:\n" + "\n".join(
             f"- {e}" for e in errors
@@ -318,7 +311,7 @@ def main():
         QtWidgets.QMessageBox.information(
             None,
             "Success",
-            f"Successfully applied {chamfer_size:.2f} mm ({chamfer_side}) chamfer to {processed_count} gear(s).",
+            f"Successfully applied parametric {chamfer_size:.2f} mm ({chamfer_side}) chamfer to {processed_count} gear(s).",
         )
 
 
