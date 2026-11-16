@@ -1,4 +1,5 @@
 import math
+import sys
 import FreeCAD as App
 import FreeCADGui as Gui
 import Part
@@ -29,10 +30,25 @@ def get_property_value(obj, property_names):
     return None
 
 
+def get_or_create_global_varset(doc):
+    """Retrieves or creates the central ChamferGlobal_values VarSet."""
+    varset_name = "ChamferGlobal_values"
+    varset_obj = doc.getObject(varset_name)
+    if not varset_obj:
+        varset_obj = doc.addObject("App::VarSet", varset_name)
+        varset_obj.Label = varset_name
+        varset_obj.addProperty("App::PropertyFloat", "ChamferSize", "Parameters", "Global Chamfer Size")
+        varset_obj.addProperty("App::PropertyEnumeration", "ChamferSide", "Parameters", "Global Chamfer Side")
+        varset_obj.ChamferSide = ["Both", "Top", "Bottom"]
+        varset_obj.ChamferSize = 1.0
+        varset_obj.ChamferSide = "Both"
+    return varset_obj
+
+
 class GearSelectionDialog(QtWidgets.QDialog):
     """Dialog displaying gear selection list, chamfer size, and side options."""
 
-    def __init__(self, gear_objects, parent=None):
+    def __init__(self, gear_objects, doc, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Select Gears & Chamfer Options")
         self.resize(400, 400)
@@ -62,11 +78,24 @@ class GearSelectionDialog(QtWidgets.QDialog):
         btn_layout.addWidget(deselect_all_btn)
         layout.addLayout(btn_layout)
 
+        # Fetch existing global values if available for defaults
+        global_varset = doc.getObject("ChamferGlobal_values")
+        default_size = float(global_varset.ChamferSize) if global_varset and hasattr(global_varset, "ChamferSize") else 1.0
+        default_side = global_varset.ChamferSide if global_varset and hasattr(global_varset, "ChamferSide") else "Both"
+
         # Side selection dropdown
         side_layout = QtWidgets.QHBoxLayout()
         side_layout.addWidget(QtWidgets.QLabel("Chamfer Side:"))
         self.side_combo = QtWidgets.QComboBox()
         self.side_combo.addItems(["Both (Top & Bottom)", "Top Only", "Bottom Only"])
+        
+        if default_side == "Top":
+            self.side_combo.setCurrentIndex(1)
+        elif default_side == "Bottom":
+            self.side_combo.setCurrentIndex(2)
+        else:
+            self.side_combo.setCurrentIndex(0)
+
         side_layout.addWidget(self.side_combo)
         layout.addLayout(side_layout)
 
@@ -75,7 +104,7 @@ class GearSelectionDialog(QtWidgets.QDialog):
         size_layout.addWidget(QtWidgets.QLabel("Chamfer Size (mm):"))
         self.chamfer_spin = QtWidgets.QDoubleSpinBox()
         self.chamfer_spin.setRange(0.01, 100.0)
-        self.chamfer_spin.setValue(1.0)
+        self.chamfer_spin.setValue(default_size)
         self.chamfer_spin.setDecimals(2)
         self.chamfer_spin.setSingleStep(0.25)
         size_layout.addWidget(self.chamfer_spin)
@@ -116,7 +145,7 @@ class GearSelectionDialog(QtWidgets.QDialog):
 
 
 class ChamferedGearFeature:
-    """Parametric FeaturePython class for chamfered gears that dynamically recomputes on changes."""
+    """Parametric FeaturePython class linked to central global chamfer VarSet with static fallback[cite: 1]."""
 
     def __init__(self, obj):
         obj.Proxy = self
@@ -130,14 +159,23 @@ class ChamferedGearFeature:
         if not gear_obj or not hasattr(gear_obj, "Shape"):
             return
 
-        chamfer_size = float(obj.ChamferSize)
-        side_val = obj.ChamferSide
-        chamfer_side = side_val if isinstance(side_val, str) else ["Both", "Top", "Bottom"][side_val]
-
         doc = obj.Document
+        global_varset = doc.getObject("ChamferGlobal_values")
+
+        # If global VarSet exists, sync/read from it. If deleted, fall back to object's current static values.
+        if global_varset and hasattr(global_varset, "ChamferSize") and hasattr(global_varset, "ChamferSide"):
+            chamfer_size = float(global_varset.ChamferSize)
+            side_val = global_varset.ChamferSide
+            chamfer_side = side_val if isinstance(side_val, str) else ["Both", "Top", "Bottom"][side_val]
+            obj.ChamferSize = chamfer_size
+            obj.ChamferSide = chamfer_side
+        else:
+            chamfer_size = float(obj.ChamferSize)
+            side_val = obj.ChamferSide
+            chamfer_side = side_val if isinstance(side_val, str) else ["Both", "Top", "Bottom"][side_val]
+
         is_ring_gear = "Ring" in gear_obj.Label
 
-        # Derive corresponding VarSet label
         varset_label = (
             gear_obj.Label[:-5] + "_values"
             if gear_obj.Label.endswith("_Body")
@@ -165,7 +203,6 @@ class ChamferedGearFeature:
             App.Console.PrintWarning(f"ChamferedGear: Missing required dimension properties for '{gear_obj.Label}'\n")
             return
 
-        # Fetch gear placement
         placement = (
             gear_obj.getGlobalPlacement()
             if hasattr(gear_obj, "getGlobalPlacement")
@@ -236,13 +273,38 @@ class _ViewProviderChamferedGear:
             </svg>
             """
 
+    def attach(self, vobj):
+        self.ViewObject = vobj
+
+    def claimChildren(self):
+        return []
+
+    def getDisplayModes(self, vobj):
+        return []
+
+    def updateData(self, feature, property):
+        return
+
+    def onChanged(self, vobj, prop):
+        return
+
+    def __getstate__(self):
+        return None
+
+    def __setstate__(self, state):
+        return None
+
+
+# Register both classes to __main__ so FreeCAD can locate them upon loading/recomputing
+setattr(sys.modules['__main__'], 'ChamferedGearFeature', ChamferedGearFeature)
+setattr(sys.modules['__main__'], '_ViewProviderChamferedGear', _ViewProviderChamferedGear)
+
 
 def process_gear(doc, gear_obj, chamfer_size, chamfer_side):
-    """Creates a parametric ChamferedGearFeature linked to the source gear."""
+    """Creates a parametric ChamferedGearFeature linked to the global VarSet."""
     res_name = f"{gear_obj.Name}_chamfered"
     res_label = f"{gear_obj.Label}_chamfered"
 
-    # Create parametric FeaturePython object
     res_obj = doc.addObject("Part::FeaturePython", res_name)
     res_obj.Label = res_label
     ChamferedGearFeature(res_obj)
@@ -254,7 +316,6 @@ def process_gear(doc, gear_obj, chamfer_size, chamfer_side):
     if App.GuiUp:
         _ViewProviderChamferedGear(res_obj.ViewObject)
 
-    # Hide original object
     if hasattr(gear_obj, "ViewObject") and gear_obj.ViewObject:
         gear_obj.ViewObject.Visibility = False
 
@@ -279,8 +340,11 @@ def main():
         )
         return
 
-    dialog = GearSelectionDialog(gear_objects)
-    if dialog.exec_() != QtWidgets.QDialog.Accepted:
+    global_varset = get_or_create_global_varset(doc)
+
+    dialog = GearSelectionDialog(gear_objects, doc)
+    
+    if dialog.exec() != QtWidgets.QDialog.Accepted:
         return
 
     selected_gears = dialog.get_selected_gears()
@@ -289,6 +353,9 @@ def main():
 
     if not selected_gears:
         return
+
+    global_varset.ChamferSize = chamfer_size
+    global_varset.ChamferSide = chamfer_side
 
     errors = []
     processed_count = 0
@@ -311,7 +378,7 @@ def main():
         QtWidgets.QMessageBox.information(
             None,
             "Success",
-            f"Successfully applied parametric {chamfer_size:.2f} mm ({chamfer_side}) chamfer to {processed_count} gear(s).",
+            f"Successfully applied global parametric chamfer ({chamfer_size:.2f} mm, {chamfer_side}) to {processed_count} gear(s).",
         )
 
 
