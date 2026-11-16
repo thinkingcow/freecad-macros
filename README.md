@@ -1,6 +1,7 @@
-## Computer generated freecad 1.1 macros
+## Gemini generated freecad 1.1 macros
+
 I've been using Freecad to design objects to be 3D printed.  I find Freecad to be powerful but confusing, 
-as it's model of operation often conflicts with mine.  I've asked Gemini to create macros for me that provide convenient 
+as it's model of operation often conflicts with mine.  I've asked Gemini to create macros (and other userful-to-me utilities) that provide convenient 
 operations for the projects I am building.  Sometimes they replicate  built-in capabilities, but in a form that makes more
 sense to me; other times they are specific to a particular project.
 
@@ -51,14 +52,17 @@ modifications I've made are changes to the UI messages.
 - ** ovalGear** Create an oval gear suitable for 2 to rotate around their centers,
 	     while meshing properly
 
-## Realated resources
-- **spur_gear_calculator.html**  A standalone html page that calculates the sizes of
+## Related Resources
+  Some of my projects are using gears: these "standalone" web pages can help.
+- **spur_gear_calculator.html**  Calculates the size of
              spur gears given the modulus and number of teeth.  Useful for back-of-the-envelope
              gear train calculations
+- **planetary_gear_calculator.html** Simple planetary gear system validator and simulator
+
 - **InitGui.py** and **install_gitPython.py**
   Creates a Freecad module for integration with git.  Everytime a "save" is requested
   (and the file is in a git heirarchy), the user is prompted for a git-commit message, 
   and the change is checked in.  The **install** script can be used to install the 
-  python library prerequisited into the appImage version of freecad.
+  python library prerequisites into the appImage version of freecad.
 
 ## TODO
