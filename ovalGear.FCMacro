@@ -281,6 +281,7 @@ class ViewProviderOvalGear2Lobe:
         return None
 
 
+# Ensure classes are bound to __main__ for persistence and session lookup
 sys.modules['__main__'].OvalGear2Lobe = OvalGear2Lobe
 sys.modules['__main__'].ViewProviderOvalGear2Lobe = ViewProviderOvalGear2Lobe
 
