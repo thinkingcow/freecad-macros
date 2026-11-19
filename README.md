@@ -37,6 +37,9 @@ modifications I've made are changes to the UI messages.
 - **spiral**     Creates an archimedes spiral.  If another object is selected, it insets
                  the spiral into the face of the object to make it easy to print in a
                  contrasting color
+
+		 The version "spiral.py" preserves the parametric nature of the spiral between
+		 saves and loads, by "importing" itself to preserve the behavior
 - **chamfer_gears** adds chamfers to one or both sides of an fcgear generated planetary gear system
 - **on_text** Writes text onto the face of the specified object.
 - **fillet**  I can't figure out how to get the built-in fillet tool to support formulas for the

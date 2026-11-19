@@ -1,0 +1,226 @@
+# -*- coding: utf-8 -*-
+"""
+FreeCAD 1.1 Macro: Remove Selected Object from Part Boolean Hierarchy
+---------------------------------------------------------------------
+Removes the currently selected object in the Part workbench from its parent
+Boolean operation (Cut, Fuse, Common, Section, MultiFuse, MultiCommon),
+deletes the selected object, and—if the Boolean operation is left with only
+one remaining child—removes the Boolean object and repairs the object
+hierarchy by re-linking its parent references to that remaining child.
+"""
+
+import FreeCAD
+import FreeCADGui
+from PySide import QtWidgets
+
+
+BOOLEAN_SINGLE_TYPES = (
+    "Part::Boolean",  # Covers Part::Cut, Part::Fuse, Part::Common, Part::Section
+)
+BOOLEAN_MULTI_TYPES = (
+    "Part::MultiFuse",
+    "Part::MultiCommon",
+)
+
+LINK_PROP_TYPES = {
+    "App::PropertyLink",
+    "App::PropertyLinkChild",
+    "App::PropertyLinkGlobal",
+    "App::PropertyLinkHidden",
+}
+LINK_LIST_PROP_TYPES = {
+    "App::PropertyLinkList",
+    "App::PropertyLinkListChild",
+    "App::PropertyLinkListGlobal",
+    "App::PropertyLinkListHidden",
+}
+LINK_SUB_PROP_TYPES = {
+    "App::PropertyLinkSub",
+    "App::PropertyLinkSubChild",
+    "App::PropertyLinkSubGlobal",
+    "App::PropertyLinkSubHidden",
+}
+LINK_SUB_LIST_PROP_TYPES = {
+    "App::PropertyLinkSubList",
+    "App::PropertyLinkSubListChild",
+    "App::PropertyLinkSubListGlobal",
+    "App::PropertyLinkSubListHidden",
+}
+
+
+def show_message(title: str, message: str, error: bool = False) -> None:
+    """Log to the FreeCAD Report View and show a Qt message box."""
+    if error:
+        FreeCAD.Console.PrintError(f"{title}: {message}\n")
+        QtWidgets.QMessageBox.critical(None, title, message)
+    else:
+        FreeCAD.Console.PrintMessage(f"{title}: {message}\n")
+        QtWidgets.QMessageBox.information(None, title, message)
+
+
+def is_boolean_operation(obj) -> bool:
+    """Return True if obj is a Part Boolean feature."""
+    return any(obj.isDerivedFrom(t) for t in BOOLEAN_SINGLE_TYPES + BOOLEAN_MULTI_TYPES)
+
+
+def get_boolean_children(bool_obj) -> list:
+    """Return the direct child objects of a Part Boolean operation."""
+    if any(bool_obj.isDerivedFrom(t) for t in BOOLEAN_MULTI_TYPES):
+        return list(getattr(bool_obj, "Shapes", []))
+
+    children = []
+    for prop in ("Base", "Tool"):
+        child = getattr(bool_obj, prop, None)
+        if child is not None:
+            children.append(child)
+    return children
+
+
+def replace_object_reference(container_obj, old_obj, new_obj) -> bool:
+    """
+    Replace all link-property references to `old_obj` on `container_obj`
+    with `new_obj`. Returns True if at least one reference was updated.
+    """
+    updated = False
+    for prop in container_obj.PropertiesList:
+        prop_type = container_obj.getTypeIdOfProperty(prop)
+
+        if prop_type in LINK_PROP_TYPES:
+            if getattr(container_obj, prop, None) == old_obj:
+                setattr(container_obj, prop, new_obj)
+                updated = True
+
+        elif prop_type in LINK_LIST_PROP_TYPES:
+            current = list(getattr(container_obj, prop, []))
+            if old_obj in current:
+                repaired = []
+                for item in current:
+                    if item == old_obj:
+                        if new_obj is not None and new_obj not in repaired:
+                            repaired.append(new_obj)
+                    elif item not in repaired:
+                        repaired.append(item)
+                setattr(container_obj, prop, repaired)
+                updated = True
+
+        elif prop_type in LINK_SUB_PROP_TYPES:
+            val = getattr(container_obj, prop, None)
+            if val and val[0] == old_obj:
+                setattr(container_obj, prop, (new_obj, val[1]) if new_obj else None)
+                updated = True
+
+        elif prop_type in LINK_SUB_LIST_PROP_TYPES:
+            current = list(getattr(container_obj, prop, []))
+            if any(item[0] == old_obj for item in current):
+                repaired = [
+                    (new_obj, item[1]) if item[0] == old_obj else item
+                    for item in current
+                    if item[0] != old_obj or new_obj is not None
+                ]
+                setattr(container_obj, prop, repaired)
+                updated = True
+
+    return updated
+
+
+def collapse_boolean_to_child(doc, bool_obj, remaining_child) -> None:
+    """
+    Replace `bool_obj` in all of its parent objects with `remaining_child`,
+    preserve visibility, and remove `bool_obj` from the document.
+    """
+    # Capture InList before mutating links
+    grandparents = list(bool_obj.InList)
+    for gp in grandparents:
+        replace_object_reference(gp, bool_obj, remaining_child)
+
+    # Restore visibility on the surviving child if the Boolean object was visible
+    if (
+        remaining_child is not None
+        and getattr(bool_obj, "ViewObject", None) is not None
+        and getattr(remaining_child, "ViewObject", None) is not None
+    ):
+        if bool_obj.ViewObject.Visibility:
+            remaining_child.ViewObject.Visibility = True
+
+    # Clear Boolean links before removal to avoid stale references
+    if any(bool_obj.isDerivedFrom(t) for t in BOOLEAN_MULTI_TYPES):
+        bool_obj.Shapes = []
+    else:
+        bool_obj.Base = None
+        bool_obj.Tool = None
+
+    doc.removeObject(bool_obj.Name)
+
+
+def remove_selected_from_boolean_hierarchy() -> None:
+    doc = FreeCAD.ActiveDocument
+    if doc is None:
+        show_message("No Active Document", "Open a document before running this macro.", error=True)
+        return
+
+    selection = FreeCADGui.Selection.getSelection()
+    if len(selection) != 1:
+        show_message(
+            "Invalid Selection",
+            "Please select exactly one object in the Tree View or 3D View.",
+            error=True,
+        )
+        return
+
+    selected = selection[0]
+
+    # Find Boolean parents that directly own `selected` as a child operand
+    boolean_parents = [
+        parent
+        for parent in selected.InList
+        if is_boolean_operation(parent) and selected in get_boolean_children(parent)
+    ]
+
+    if not boolean_parents:
+        show_message(
+            "Invalid Parent",
+            f"'{selected.Label}' does not have a Part Boolean operation "
+            f"(Cut, Fuse, Common, Section) as its parent.",
+            error=True,
+        )
+        return
+
+    doc.openTransaction("Remove Object from Boolean Hierarchy")
+    try:
+        for bool_parent in boolean_parents:
+            if any(bool_parent.isDerivedFrom(t) for t in BOOLEAN_MULTI_TYPES):
+                remaining = [obj for obj in bool_parent.Shapes if obj != selected]
+                if len(remaining) > 1:
+                    bool_parent.Shapes = remaining
+                elif len(remaining) == 1:
+                    collapse_boolean_to_child(doc, bool_parent, remaining[0])
+                else:
+                    collapse_boolean_to_child(doc, bool_parent, None)
+            else:
+                # Binary Part::Boolean (Cut, Fuse, Common, Section)
+                if bool_parent.Base == selected and bool_parent.Tool == selected:
+                    remaining_child = None
+                elif bool_parent.Base == selected:
+                    remaining_child = bool_parent.Tool
+                else:
+                    remaining_child = bool_parent.Base
+
+                collapse_boolean_to_child(doc, bool_parent, remaining_child)
+
+        # Detach any remaining non-Boolean references (e.g. Std_Part/Group) and delete the object
+        if doc.getObject(selected.Name) is not None:
+            doc.removeObject(selected.Name)
+
+        doc.recompute()
+        doc.commitTransaction()
+        FreeCAD.Console.PrintMessage(
+            f"Removed '{selected.Label}' and repaired the Boolean object hierarchy.\n"
+        )
+    except Exception as exc:
+        doc.abortTransaction()
+        show_message("Operation Failed", f"Could not remove object: {exc}", error=True)
+        raise
+
+
+if __name__ == "__main__":
+    remove_selected_from_boolean_hierarchy()
